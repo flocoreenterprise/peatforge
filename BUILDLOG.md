@@ -54,3 +54,13 @@ Reference app may be used visually/behaviorally when its URL is available, never
   NASA regional hotspot56916 records from both feeds (not village fires). Cache runtime/engine/http.
 - Preview tunnel closed on course correction. Integrated tunnel will open after final security gate.
 - Scope/cuts and source-behavior mapping tracked in FEATURE_PARITY.md. Visual reference only user-supplied screenshots.
+
+### Engine gate progress
+
+- A3 commit7963c84:33 testsPASS, Luna audit no findings.
+- A4 commit032c493:43 testsPASS incl agent response shape validation and correct parameter-history timestamp.
+- Corrected all5 names/coordinates using actual BMKG metadata. Weather cache re-fetched for corrected coordinates.
+- Found explicitERA5-Land returns null rain/ET0 despite populated dates/temp/soil. Changed toERA5; all5 archives76days now complete.
+- Root verified actualcached Talio day9: modelled WT/PFVI, canal+60cm scenario delays crossingJune30 toJuly1 (+1day).
+  Day8 has a lower-bound benefit, not a fabricated exactdays value. All5 live numeric paths also verified.
+- A5 API is next; no change to external messaging credentials or recipients.
