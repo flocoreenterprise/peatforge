@@ -15,7 +15,7 @@ from .realtime import BrowserVoice
 
 class DemoVoice(BrowserVoice):
     def __init__(self,*args,timer_factory=Timer,**kwargs):
-        super().__init__(*args,lifetime=120,**kwargs)
+        super().__init__(*args,lifetime=600,**kwargs)
         self.pending={}
         self.timers={}
         self.timer_factory=timer_factory
@@ -30,7 +30,7 @@ class DemoVoice(BrowserVoice):
             connection.execute('BEGIN IMMEDIATE')
             row=connection.execute("SELECT value FROM kv WHERE key='demo-voice-budget'").fetchone()
             entries=[v for v in (json.loads(row['value']) if row else []) if v>self.clock()-3600]
-            if len(entries)>=20 or self.db.get('demo-voice-hangup-failed',False):
+            if len(entries)>=200 or self.db.get('demo-voice-hangup-failed',False):
                 raise HTTPException(429,'Demo voice limit reached')
             entries.append(self.clock())
             connection.execute("INSERT INTO kv(key,value) VALUES('demo-voice-budget',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(json.dumps(entries),))
@@ -48,7 +48,7 @@ class DemoVoice(BrowserVoice):
             timer.daemon=True
             self.timers[sid]=timer
             timer.start()
-        return {**result,'server_connect':True,'max_seconds':120}
+        return {**result,'server_connect':True,'max_seconds':600}
 
     def connect(self,access,sid,sdp):
         if not sdp.startswith('v=0') or len(sdp)>65536:

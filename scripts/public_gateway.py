@@ -10,11 +10,12 @@ PUBLIC_HTTP = {
     ('POST', '/api/public/sessions'), ('GET', '/api/public/messages'),
     ('POST', '/api/public/messages'), ('POST', '/api/public/voice/session'),
     ('POST', '/api/public/voice/end'),
+    ('POST', '/api/public/voice/connect'), ('POST', '/api/public/voice/transcript'), ('POST', '/api/public/voice/tool'),
 }
 PUBLIC_WS = '/api/public/voice/stream'
 PHONE_HTTP=frozenset(('/api/voice/twilio/twiml/start','/api/voice/twilio/twiml/gather','/api/voice/twilio/status'))
 PHONE_PATH=re.compile(r'/api/voice/stream')
-DEMO_GET=re.compile(r'/api/(?:config|health|auth/session|villages(?:/[^/]+/(?:status|forecast|canals|resources|params/history))?|map/risk|hotspots|canals/osm|replay/(?:meta|milestones|hotspots/summary|day/\d+|[^/]+/day/\d+)|national/(?:hotspots|overview)|fire-events|responders(?:/[^/]+/(?:messages|field-link))?|actions|observations|trace|policy|demo/progress|field/[^/]+/messages)')
+DEMO_GET=re.compile(r'/api/(?:config|health|auth/session|backtest|villages(?:/[^/]+/(?:status|forecast|canals|resources|params/history))?|map/risk|hotspots|canals/osm|replay/(?:meta|milestones|hotspots/summary|day/\d+|[^/]+/day/\d+)|national/(?:hotspots|overview)|fire-events|responders(?:/[^/]+/(?:messages|field-link))?|actions|observations|trace|policy|demo/progress|field/[^/]+/messages)')
 DEMO_POST=re.compile(r'/api/(?:demo/inbound|events/risk-changed|scout/tick|actions/[^/]+/(?:approve|reject)|villages/[^/]+/simulate|voice/(?:session|connect|transcript|tool|end|simulate)|field/[^/]+/send)')
 
 
@@ -85,7 +86,7 @@ class Boundary:
                     method=scope.get('method')
                     if path.startswith('/api/voice/twilio/') or path.startswith('/api/channels/') or path.startswith('/api/responders/') and path.endswith('/send'):
                         return await reject(scope,receive,send,403)
-                    allowed=allowed or method=='GET' and (path=='/' or bool(DEMO_GET.fullmatch(path)) or bool(re.fullmatch(r'/f/[A-Za-z0-9_-]+',path)))
+                    allowed=allowed or method=='GET' and (path in ('/','/favicon.svg') or bool(DEMO_GET.fullmatch(path)) or bool(re.fullmatch(r'/f/[A-Za-z0-9_-]+',path)))
                     allowed=allowed or method=='POST' and bool(DEMO_POST.fullmatch(path))
                 if not self.phone_only and scope.get('method') == 'GET' and re.fullmatch(r'/assets/[A-Za-z0-9_.-]+\.(?:js|mjs|css|woff2?|png|svg|webp|ico)', path):
                     allowed = True
@@ -100,7 +101,7 @@ class Boundary:
                             if message['type']=='http.disconnect':
                                 return
                             chunk=message.get('body',b'')
-                            if len(body)+len(chunk)>(131072 if path=='/api/voice/connect' else 8192):
+                            if len(body)+len(chunk)>(131072 if path in ('/api/voice/connect','/api/public/voice/connect') else 8192):
                                 return await reject(scope,receive,send,413)
                             body.extend(chunk)
                             if not message.get('more_body',False):

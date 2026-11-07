@@ -41,12 +41,12 @@ class DemoVoiceTests(unittest.TestCase):
         result=self.client.post('/api/voice/session',json={'responder_id':'r1'}).json()
         self.assertNotIn('client_secret',result)
         self.assertTrue(result['server_connect'])
-        self.assertEqual(result['session_expires_at'],self.now+120)
+        self.assertEqual(result['session_expires_at'],self.now+600)
         sid=result['session_id']
         self.assertEqual(self.connect(sid).status_code,200)
         self.assertEqual(self.connect(sid).status_code,409)
         timer=self.service.timers[sid]
-        self.assertEqual(timer.seconds,120)
+        self.assertEqual(timer.seconds,600)
         timer.callback()
         self.assertEqual(self.hangups,['/v1/realtime/calls/rtc_test/hangup'])
         self.assertTrue(self.service.db.get(self.service._key(sid))['ended'])
@@ -56,10 +56,9 @@ class DemoVoiceTests(unittest.TestCase):
         self.assertNotIn(self.service.settings.key,data)
 
     def test_rolling_hour_cap_survives_service_restart(self):
-        for unused in range(20):
-            sid=self.mint()
-            self.client.post('/api/voice/end',json={'session_id':sid})
-            self.now+=61
+        for unused in range(200):
+            self.service._budget()
+            self.now+=1
         response=self.client.post('/api/voice/session',json={'responder_id':'r1'})
         self.assertEqual(response.status_code,429)
         self.assertIn('Batas demo',response.text)
@@ -81,7 +80,7 @@ class DemoVoiceTests(unittest.TestCase):
         sid=self.mint()
         def provider(request):
             if request.url.path.endswith('/calls'):
-                self.now+=121
+                self.now+=601
                 return httpx.Response(201,text='v=0\r\ns=answer',headers={'Location':'/v1/realtime/calls/rtc_late'})
             self.hangups.append(request.url.path)
             return httpx.Response(200)

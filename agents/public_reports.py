@@ -1,9 +1,10 @@
-"""Scoped, anonymous public text reporting. No provider credentials or voice minting."""
+"""Scoped anonymous public text and server-capped voice reporting."""
 import hashlib
 import json
 import re
 import secrets
 import time
+import asyncio
 from threading import RLock
 from fastapi import APIRouter,HTTPException,Request
 from pydantic import Field,StrictBool,model_validator
@@ -11,6 +12,21 @@ from engine.villages import list_villages
 from .db import identifier,utc_now
 from .models import Model
 from .persona import greeting
+from .realtime import Access
+from typing import Literal
+
+class VoiceEnd(Model):
+    session_id:str=Field(min_length=1,max_length=80)
+class VoiceConnect(VoiceEnd):
+    sdp:str=Field(min_length=3,max_length=65536)
+class VoiceTranscript(VoiceEnd):
+    event_id:str=Field(min_length=1,max_length=128)
+    role:Literal['user','assistant']
+    text:str=Field(min_length=1,max_length=500)
+class VoiceTool(VoiceEnd):
+    call_id:str=Field(min_length=1,max_length=128)
+    name:str=Field(min_length=1,max_length=80)
+    arguments:dict=Field(default_factory=dict)
 
 class Start(Model):
     village_id:str=Field(min_length=1,max_length=80)
@@ -82,7 +98,7 @@ class PublicReports:
             safe_actions[-1]['status']=row['status']
         warden=self.db.get('warden:'+rid,{})
         state=warden.get('state','collecting')
-        return dict(items=[dict(row) for row in rows if row['direction']!='inbound' or row['id'].startswith('m_public_')],actions=safe_actions,state=state,stage=session['state']['stage'],ended=session.get('ended',False),voice_available=False,source='public')
+        return dict(items=[dict(row) for row in rows],actions=safe_actions,state=state,stage=session['state']['stage'],ended=session.get('ended',False),voice_available=bool(self.app.state.demo_public),source='public')
     def send(self,digest,session,text,event_id):
         with self.lock:
             session=self.db.get('public-session:'+digest)
@@ -113,6 +129,15 @@ class PublicReports:
 
 def router():
     routes=APIRouter(prefix='/api/public')
+    def voice_access(request):
+        digest,session=request.app.state.public_reports.authenticate(request)
+        if not request.app.state.demo_public:
+            raise HTTPException(503,'Public voice unavailable; please use text')
+        with request.app.state.database.connect() as connection:
+            responder=connection.execute('SELECT village_id FROM responders WHERE id=?',(session['responder_id'],)).fetchone()
+        if not responder:
+            raise HTTPException(401,'Reporting session unavailable')
+        return Access('public:'+digest,session['responder_id'],responder['village_id'],'live',0,True)
     @routes.get('/villages')
     def villages(request:Request):
         request.app.state.public_reports.enabled()
@@ -132,11 +157,23 @@ def router():
         digest,session=service.authenticate(request)
         return service.send(digest,session,body.text,body.event_id)
     @routes.post('/voice/session')
-    def voice(request:Request):
-        request.app.state.public_reports.authenticate(request)
-        raise HTTPException(503,'Public voice unavailable; please use text')
+    async def voice(request:Request):
+        access=voice_access(request)
+        return await asyncio.to_thread(request.app.state.browser_voice.mint,access)
+    @routes.post('/voice/connect')
+    async def connect(request:Request,body:VoiceConnect):
+        access=voice_access(request)
+        return await asyncio.to_thread(request.app.state.browser_voice.connect,access,body.session_id,body.sdp)
+    @routes.post('/voice/transcript')
+    def transcript(request:Request,body:VoiceTranscript):
+        access=voice_access(request)
+        return request.app.state.browser_voice.transcript(access,body.session_id,body.event_id,body.role,body.text)
+    @routes.post('/voice/tool')
+    def tool(request:Request,body:VoiceTool):
+        access=voice_access(request)
+        return request.app.state.browser_voice.tool(access,body.session_id,body.call_id,body.name,body.arguments)
     @routes.post('/voice/end')
-    def end(request:Request):
-        request.app.state.public_reports.authenticate(request)
-        return {'ended':True}
+    def end(request:Request,body:VoiceEnd):
+        access=voice_access(request)
+        return request.app.state.browser_voice.end(access,body.session_id)
     return routes

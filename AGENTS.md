@@ -149,3 +149,7 @@ Hard rules:
 ## Two-instance shipping override
 - Keep protected operator on8000 with PIN and a callback-only tunnel; public DEMO_PUBLIC=1 on8001 has its own tunnel and database. Protected real delivery remains available for a separately attended stage call; do not place any call while checking deployment.
 - Runtime PUBLIC_BASE_URL overrides are process-local. Never convert the protected callback host into a public dashboard. Root completes integration directly; no new layout work.
+
+## Latest attended demo authorization
+- User authorized dated process-only DEMO_NO_CALL_LIMITS=1 with DEMO_NO_CALL_LIMITS_DATE for protected8000; default policy unchanged, PIN/consent/UAT scope preserved. Public8001 real delivery remains403. Public browservoice600s,200/hour.
+- Ship QR voice on original UI first, then integrate Martin frontend confirmed by user created today at venue. Preserve original backup; explicit teammate Co-authored-by trailer allowed. No AI attribution.

@@ -6,14 +6,19 @@ import { ValidatedAudioGate } from './audioGate';
 import { callLifetimeMs, ephemeralCurrent } from './sessionClock';
 import './voice.css';
 
-export type VoicePanelProps = { fieldToken?: string; responderId?: string; mode?: 'live' | 'replay'; day?: number };
+export type VoicePanelProps = { fieldToken?: string; responderId?: string; mode?: 'live' | 'replay'; day?: number; onChanged?: () => void; publicToken?: string; autoStart?: boolean; onFallback?: () => void };
+export const publicVoiceLifetimeMs = (expiresAt?: number | string, now = Date.now()) => {
+  if (expiresAt === undefined) return 600000;
+  const deadline = typeof expiresAt === 'number' ? expiresAt * 1000 : Date.parse(expiresAt);
+  return Math.max(1, Math.min(600000, deadline - now || 1));
+};
 type Phase = 'idle' | 'connecting' | 'live' | 'simulation' | 'ended' | 'denied';
 type Session = { session_id: string; client_secret?: string; server_connect?: boolean; expires_at: number | string; session_expires_at?: number | string; model: string; voice: string };
 type Simulation = { items: { id?: string; role?: string; direction?: string; text?: string; body?: string }[]; state?: string; session_id?: string; ended?: boolean };
 class VoiceError extends Error { constructor(public status: number) { super('Layanan suara belum tersedia.'); } }
 const denied = (error: unknown) => error instanceof VoiceError && [401, 403, 404].includes(error.status);
 
-export default function VoicePanel({ fieldToken, responderId, mode = 'live', day = 0 }: VoicePanelProps) {
+export default function VoicePanel({ fieldToken, responderId, mode = 'live', day = 0, onChanged, publicToken, autoStart = false, onFallback }: VoicePanelProps) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [notice, setNotice] = useState('');
   const [entries, setEntries] = useState<Transcript[]>([]);
@@ -31,12 +36,14 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
   const simulationSession = useRef<string | null>(null);
   const mutedRef = useRef(false);
   const audioBusy = useRef(false);
+  const changed = useRef(onChanged);
+  changed.current = onChanged;
 
-  function bodyScope() { return { ...(responderId ? { responder_id: responderId } : {}), mode, day }; }
+  function bodyScope() { if (publicToken) return { mode, day }; return { ...(responderId ? { responder_id: responderId } : {}), mode, day }; }
   async function request<T>(path: string, body: unknown, signal: AbortSignal): Promise<T> {
-    const response = await fetch(`/api/voice/${path}`, {
-      method: 'POST', credentials: fieldToken ? 'omit' : 'same-origin', cache: 'no-store', referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json', ...(fieldToken ? { 'X-Field-Token': fieldToken } : {}) },
+    const response = await fetch(`${publicToken ? "/api/public/voice" : "/api/voice"}/${path}`, {
+      method: 'POST', credentials: fieldToken || publicToken ? 'omit' : 'same-origin', cache: 'no-store', referrerPolicy: 'no-referrer', redirect: 'error',
+      headers: { 'Content-Type': 'application/json', ...(fieldToken ? { 'X-Field-Token': fieldToken } : {}), ...(publicToken ? { Authorization: `Bearer ${publicToken}` } : {}) },
       body: JSON.stringify(body), signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
     });
     if (!response.ok) throw new VoiceError(response.status);
@@ -54,12 +61,13 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
   function fail(error: unknown, version: number) {
     if (version !== generation.current) return;
     dispose(); setMuted(false); setSending(false);
+    if (publicToken) onFallback?.();
     if (denied(error)) {
       setPhase('denied'); setEntries([]); setText(''); pendingText.current = null;
       setNotice('Akses percakapan ditolak atau tautan sudah tidak berlaku.');
     } else {
       setPhase('simulation');
-      setNotice(error instanceof VoiceError && error.status === 429 ? 'Batas demo tercapai (demo limit reached). Coba lagi nanti atau gunakan Simulasi teks.' : 'Suara belum tersedia. Gunakan Simulasi teks; laporan diproses oleh Warden yang sama.');
+      setNotice(error instanceof VoiceError && error.status === 429 ? 'Batas demo suara tercapai (200 sesi per jam, maksimal 600 detik per sesi). Coba lagi nanti atau gunakan Simulasi teks.' : 'Suara belum tersedia. Gunakan Simulasi teks; laporan diproses oleh Warden yang sama.');
     }
   }
   useEffect(() => {
@@ -67,7 +75,15 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
     return dispose;
     // A different scope must release the previous microphone and all pending requests.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fieldToken, responderId, mode, day]);
+  }, [fieldToken, publicToken, responderId, mode, day]);
+
+  useEffect(() => {
+    if (!autoStart) return;
+    const timer = setTimeout(() => { void start(); }, 0);
+    return () => clearTimeout(timer);
+    // Mounted only after an explicit consented user action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, publicToken]);
 
   async function start() {
     if (busy.current || phase === 'denied') return;
@@ -85,8 +101,8 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
       const sessionId = session.session_id;
       const endBody = { session_id: sessionId };
       closeServer.current = () => { void request('end', endBody, new AbortController().signal).catch(() => {}); };
-      if (!ephemeralCurrent(session.expires_at)) throw new Error('Sesi kedaluwarsa.');
-      const sessionTimer = setTimeout(() => { if (active()) { dispose(); setPhase('ended'); setNotice('Batas sesi berakhir. Mulai lagi bila diperlukan.'); } }, callLifetimeMs(session.session_expires_at));
+      if (!session.server_connect && !ephemeralCurrent(session.expires_at)) throw new Error('Sesi kedaluwarsa.');
+      const sessionTimer = setTimeout(() => { if (active()) { dispose(); setPhase('ended'); setNotice('Batas sesi berakhir. Mulai lagi bila diperlukan.'); } }, session.server_connect ? publicVoiceLifetimeMs(session.session_expires_at) : callLifetimeMs(session.session_expires_at));
       resources.add(() => clearTimeout(sessionTimer));
       if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined' || typeof MediaRecorder === 'undefined') throw new Error('Suara tidak didukung.');
       const media = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -134,7 +150,7 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
         persist: entry => request('transcript', { session_id: sessionId, event_id: entry.id, role: entry.role, text: entry.text }, controller.signal),
         tool: (callId, name, args) => request('tool', { session_id: sessionId, call_id: callId, name, arguments: args }, controller.signal),
         send,
-        transcript: entry => { if (active()) setEntries(previous => [...previous, entry]); },
+        transcript: entry => { if (active()) { setEntries(previous => [...previous, entry]); changed.current?.(); } },
         ended: () => { if (active()) { dispose(); setPhase('ended'); setNotice('Percakapan selesai.'); } },
         validated: (responseId, itemId) => gate.approved(responseId, itemId),
         failed: () => fail(new Error('Transkripsi belum tersedia.'), version),
@@ -167,13 +183,14 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
       const offer = await pc.createOffer();
       if (!active()) return;
       await pc.setLocalDescription(offer);
-      if (!ephemeralCurrent(session.expires_at)) throw new Error('Sesi kedaluwarsa.');
+      if (!session.server_connect && !ephemeralCurrent(session.expires_at)) throw new Error('Sesi kedaluwarsa.');
       let sdp: string;
       if (session.server_connect) {
         const answer = await request<{ sdp: string }>('connect', { session_id: sessionId, sdp: offer.sdp }, controller.signal);
+        if (typeof answer.sdp !== 'string' || !answer.sdp) throw new Error('Sambungan suara tidak valid.');
         sdp = answer.sdp;
       } else {
-        let ephemeral = session.client_secret; session.client_secret = '';
+        let ephemeral = session.client_secret!; session.client_secret = '';
         const response = await fetch('https://api.openai.com/v1/realtime/calls', {
           method: 'POST', headers: { Authorization: `Bearer ${ephemeral}`, 'Content-Type': 'application/sdp' },
           body: offer.sdp, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]), credentials: 'omit', referrerPolicy: 'no-referrer',
@@ -208,6 +225,7 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
         closeServer.current = () => { void request('end', { session_id: sessionId }, new AbortController().signal).catch(() => {}); };
       }
       setEntries(result.items.map((item, index) => ({ id: item.id ?? `${pending.id}:${index}`, role: item.role === 'user' || item.direction === 'inbound' ? 'user' : 'assistant', text: item.text ?? item.body ?? '' })).filter(item => item.text) as Transcript[]);
+      changed.current?.();
       setPipelineState(result.state ?? ''); setText(''); pendingText.current = null;
       setNotice('Simulasi teks — mikrofon tidak digunakan.');
       if (result.ended) { dispose(); setSending(false); setPhase('ended'); setNotice('Simulasi selesai.'); }
@@ -220,21 +238,21 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
   }
 
   return <section className="voice-panel" aria-label="Talk to Warden">
-    <div className="voice-heading"><div><h3>Talk to Warden</h3><p>GPT Realtime live - suara browser.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
-    <p className="voice-privacy">Demo publik: maksimal 2 menit/sesi, 20 sesi/jam untuk semua pengunjung. SMS/telepon tetap Simulated. Mikrofon aktif setelah Anda menekan Talk to Warden. Suara langsung diproses OpenAI dan transkrip disimpan. Laporan dicatat setelah konfirmasi YA; tindakan lapangan perlu persetujuan operator.</p>
+    <div className="voice-heading"><div><h3>{publicToken ? 'Bicara dengan Warden' : 'Talk to Warden'}</h3><p>Laporan suara dan konfirmasi lapangan. Demo publik: maksimal 600 detik per sesi, 200 sesi per jam.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
+    <p className="voice-privacy">Mikrofon aktif setelah Anda menekan Talk to Warden. Suara langsung diproses OpenAI dan transkrip disimpan. Laporan dicatat setelah konfirmasi YA; tindakan lapangan perlu persetujuan operator.</p>
     <div className="voice-actions">
-      {phase !== 'live' && phase !== 'connecting' && <button type="button" disabled={phase === 'denied' || sending} onClick={() => void start()}>Talk to Warden</button>}
+      {phase !== 'live' && phase !== 'connecting' && <button type="button" disabled={phase === 'denied' || sending} onClick={() => void start()}>{publicToken ? 'Bicara dengan Warden' : 'Talk to Warden'}</button>}
       {(phase === 'live' || phase === 'connecting') && <>
         <button type="button" disabled={phase !== 'live'} aria-pressed={muted} onClick={() => { const next = !muted; mutedRef.current = next; stream.current?.getAudioTracks().forEach(track => { track.enabled = !next && !audioBusy.current; }); setMuted(next); }}>{muted ? 'Aktifkan mikrofon' : 'Bisukan mikrofon'}</button>
-        <button type="button" className="voice-end" onClick={() => { dispose(); setMuted(false); setPhase('ended'); setNotice('Panggilan diakhiri.'); }}>Akhiri</button>
+        <button type="button" className="voice-end" onClick={() => { dispose(); setMuted(false); setPhase('ended'); setNotice('Panggilan diakhiri.'); }}>{publicToken ? 'Tutup' : 'Akhiri'}</button>
       </>}
-      {['idle', 'ended'].includes(phase) && <button type="button" className="voice-secondary" onClick={() => { dispose(); setPhase('simulation'); setNotice('Simulasi teks — mikrofon tidak digunakan.'); }}>Buka Simulasi teks</button>}
-      {phase === 'simulation' && <button type="button" className="voice-secondary" disabled={sending} onClick={() => { dispose(); setPhase('ended'); setNotice('Simulasi ditutup.'); }}>Tutup Simulasi</button>}
+      {!publicToken && ['idle', 'ended'].includes(phase) && <button type="button" className="voice-secondary" onClick={() => { dispose(); setPhase('simulation'); setNotice('Simulasi teks — mikrofon tidak digunakan.'); }}>Buka Simulasi teks</button>}
+      {!publicToken && phase === 'simulation' && <button type="button" className="voice-secondary" disabled={sending} onClick={() => { dispose(); setPhase('ended'); setNotice('Simulasi ditutup.'); }}>Tutup Simulasi</button>}
     </div>
     {notice && <p className="voice-notice" role="status">{notice}</p>}
     <audio ref={audio} hidden aria-hidden="true" />
     {!!entries.length && <ol className="voice-transcripts" aria-label="Transkrip percakapan">{entries.map(entry => <li key={`${entry.role}:${entry.id}`}><strong>{entry.role === 'user' ? 'Anda' : 'Warden'}</strong><p>{entry.text}</p></li>)}</ol>}
-    {phase === 'simulation' && <form className="voice-form" onSubmit={event => void simulate(event)}>
+    {!publicToken && phase === 'simulation' && <form className="voice-form" onSubmit={event => void simulate(event)}>
       <label htmlFor={`voice-text-${fieldToken ? 'field' : responderId ?? 'operator'}`}>Pesan Simulasi untuk Warden</label>
       <textarea id={`voice-text-${fieldToken ? 'field' : responderId ?? 'operator'}`} value={text} maxLength={500} disabled={sending} onChange={event => setText(event.target.value)} placeholder="Tulis laporan lapangan, lalu konfirmasikan saat Warden meminta." rows={3} />
       <button disabled={sending || !text.trim()}>{sending ? 'Mengirim…' : 'Kirim Simulasi'}</button>
