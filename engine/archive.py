@@ -19,8 +19,10 @@ END=date(2019,8,15)
 def _configured_key():
     # Latest configured file wins over inherited process state; never log values.
     from dotenv import dotenv_values
-    value=(dotenv_values(Path(__file__).resolve().parent.parent/'.env').get('FIRMS_MAP_KEY') or '').strip()
-    return value or os.environ.get('FIRMS_MAP_KEY','').strip()
+    configured=dotenv_values(Path(__file__).resolve().parent.parent/'.env')
+    if 'FIRMS_MAP_KEY' in configured:
+        return (configured['FIRMS_MAP_KEY'] or '').strip()
+    return os.environ.get('FIRMS_MAP_KEY','').strip()
 
 
 def _distance(lat1,lon1,lat2,lon2):

@@ -1,10 +1,11 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import date
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from engine.archive import FirmsArchive
+from engine.archive import FirmsArchive,_configured_key
 from engine.cache import DiskCache
 from engine.ingest import Ingest
 from engine.service import EngineService
@@ -20,6 +21,16 @@ class ArchiveTests(unittest.TestCase):
     def fetch(self,url,timeout):
         day=url.rsplit('/',1)[-1]
         return HEADER+f'-3.10,114.11,{day},0030,n,8.2,N\n-3.10,114.11,{day},0030,n,8.2,N\n0,0,{day},0030,n,10,N\n'
+
+    def test_explicit_cleared_file_key_never_revives_inherited_value(self):
+        with patch.dict('os.environ',{'FIRMS_MAP_KEY':'synthetic-inherited'}):
+            for configured in ({'FIRMS_MAP_KEY':''},{'FIRMS_MAP_KEY':None},{'FIRMS_MAP_KEY':'  '}):
+                with patch('dotenv.dotenv_values',return_value=configured):
+                    self.assertEqual(_configured_key(),'')
+            with patch('dotenv.dotenv_values',return_value={}):
+                self.assertEqual(_configured_key(),'synthetic-inherited')
+            with patch('dotenv.dotenv_values',return_value={'FIRMS_MAP_KEY':'synthetic-current'}):
+                self.assertEqual(_configured_key(),'synthetic-current')
 
     def test_complete13chunks_union_overlap_and_cache_secret_free(self):
         calls=[]
