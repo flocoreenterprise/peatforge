@@ -19,3 +19,43 @@ Audit after each block; mock fixtures only in tests; isolated temporary state.
 Required checks include mass balance, RF branches, PFVI clamps, bounded parameters,
 Days Bought null/zero/positive and replay. Do not tune to an advertised demo number.
 Return files changed, test commands with pass/fail, open risks. Orchestrator commits after passing checks.
+
+A1 ingest foundation (Python 3.11+, stdlib only):
+
+```python
+from engine.ingest import Ingest
+from engine.cache import DiskCache
+fixture_data = Ingest()  # explicit synthetic provenance, never network
+weather = fixture_data.weather('62.11.01.2002')
+# Configured private runtime only; PUBLIC_DEMO must keep using Ingest().
+# live_data = Ingest(DiskCache('engine/.cache'), mode='live')
+```
+
+`weather()` returns daily rain/ET0 in mm, temperature C, mineral-soil moisture
+percent. Archive uses ERA5-Land and is labelled historical perfect-forecast
+forcing. Forecast derives a 0-7 cm proxy from depth-weighted 0-1, 1-3, 3-9 cm
+layers, assuming uniform moisture within the last layer. Missing values remain
+null with reasons. Neither input is measured peat groundwater.
+
+`hotspots()` merges NOAA-20/21 regional seven-day CSVs. Both unavailable raises
+`DataUnavailable`, never a synthetic empty success. A single source failure sets
+`partial`; stale cached data is labelled separately. Heat detections are not
+confirmed fires. `archive_hotspots()` requires an explicitly supplied key, uses
+five-day chunks, and defaults to NOAA-20 SP; no 2019 NOAA-21 coverage is invented.
+No live provider availability has been verified during A1.
+
+Cache filenames are SHA256 of credential-redacted URLs; URLs and credentials are
+not persisted. Successful parsed bodies and UTC retrieval time are saved atomically.
+`data_as_of` for live adapters means retrieval time, not a satellite detection or
+provider model-run time; hotspot records separately contain `detected_at`. Failed
+refreshes use validated stale cache, but 401/403 always raises AuthenticationError.
+Each request has a ten-second timeout and one retry with backoff by default.
+Credentials are passed by callers, never loaded from environment files here.
+
+Five seeds have unverified synthetic adm4/name/coordinate mappings; no official
+boundaries are provided. Canals, wells and hamlets are fixtures. Fixture weather
+is a repeated three-day synthetic sequence, including in replay date windows;
+it must never be described as downloaded ERA5 history.
+
+Offline verification: `python -m unittest discover -s engine/tests -v`.
+Tests inject provider bodies/failures and isolate disk caches in temporary folders.
