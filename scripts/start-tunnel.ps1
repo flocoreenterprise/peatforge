@@ -1,6 +1,7 @@
 [CmdletBinding()]
-param([int]$Port = 8000)
+param([int]$Port = 8001)
 $ErrorActionPreference = 'Stop'
+if ($Port -ne 8001) { throw 'Only the reviewed public-reporting gateway on port 8001 may be tunneled. Operator port 8000 stays local.' }
 if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) { throw 'Install cloudflared before using this script.' }
 # Run only while sharing the demo. Ctrl+C closes this tunnel. Access logging is disabled in start.ps1.
 function Protect-TunnelLog {

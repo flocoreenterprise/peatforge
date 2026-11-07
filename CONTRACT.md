@@ -280,3 +280,41 @@ Uvicorn starts with --no-proxy-headers so request.client remains the socketpeer 
 - Explicit CLI --uat-pair allows one diagnostic then one Warden call to the configured consenting recipient per WIB day; no counter reset, no third call, normal daily cap and cooldown remain. No HTTP field can opt in.
 - cli_voice status reads only the chosen recipient provider calls and redacted local voice transcript; it does not initiate calls.
 - SMS mock selection is independent of configured Twilio when gateway settings are absent; configured gateway failures never fall back to mock.
+
+## Minimal public reporting — deadline14:00 override
+- Local operator remains loopback8000 withoutPIN peruser. Publicingress loopback8001 is strictallowlist; tunnelONLY8001aftersecurityreviewanduserrequest. Sharedsingleapp lifespan/database/budgets. NooperatorAPI,fieldlinks,ephemeralvoicecredentials orTwilio callback exposedpublicly.
+- GET/api/public/villages -> {items:[{id,name,lat,lon}]}; POST/api/public/sessions {village_id,consent:true} -> {token,items,state,voice_available}. TokenneverinURL/logs; frontendstores scopedcapabilitysessionStorage.
+- GET/api/public/messages andPOST/api/public/messages {text,event_id} requireAuthorization:Bearer scopedtoken. Returnonlyownitems/actions/state. Reporterfollowup3spoll; operator4spoll. Serverforcesresponder/village/livecontext.
+- Public reports source=public, label Laporan publik, LOW/unverified evenifvolunteerednumeric andcallerYA. NeverA6assimilation orautomaticfielddispatch. Sameparser/readback/Verifier/approval pipeline, noexternalSMS/calls.
+- POST/api/public/voice/session and/end scoped; publicvoice unavailable503unlessserverowned180smediarelay andatomicglobal/perIP/dailybudgets areimplemented/tested. Neverfallthrough tooperatorWebRTCephemeralroute. Textfallbackmustremainusable.
+- Proposed voicecaps:180s,global5/min,perIP2/min,concurrent3,total20/day. Unknownproxyidentitysharedconservativebucket; XForwardedFornevertrusted. Reservebeforeproviderstart, ambiguousattemptconsumesbudget, noautomaticretry.
+- OptionalWS/api/public/voice/stream scopedcapabilityfirstframe, noquerytoken; serveracceptsonlyboundedPCM, ownstools/transcripts/config; closesupstreamdeadline/disconnect. Ifnotgreenby13:50keep503/textfallback, disclosecut.
+
+## Public reporting frontend contract (implemented)
+All examples below use synthetic IDs. No cookies are accepted instead of the scoped Bearer token. Public ingress exposes only /lapor, built assets and the exact public endpoints. Operator endpoints remain on localhost8000. The optional attended phone gateway adds only signed callbacks/stream, never operator access.
+
+| Endpoint | Request | Response |
+|---|---|---|
+| GET /api/public/villages | none | {"items":[{"id":"62.11.01.2002","name":"Talio","lat":-3.1222040246,"lon":114.0981588862}]} |
+| POST /api/public/sessions | {"village_id":"62.11.01.2002","consent":true} | PublicThread plus {"token":"<43-character capability>"} |
+| GET /api/public/messages | Authorization: Bearer <capability> | PublicThread |
+| POST /api/public/messages | same Authorization; {"text":"Parit sudah kering","event_id":"client-unique-id"} | PublicThread; repeated same event/text idempotent, changed text409 |
+| POST /api/public/voice/session | same Authorization; {} | 503 {"error":{"code":"unavailable","message":"Layanan belum tersedia"}}; public voice is cut, no provider mint |
+| POST /api/public/voice/end | same Authorization; {} | {"ended":true}; no active provider session |
+
+PublicThread example:
+```json
+{"items":[{"id":"m_example","direction":"outbound","body":"Air di parit dekat kebun masih ada atau sudah kering?","status":"mock","created_at":"2026-11-07T06:30:00Z"}],"actions":[],"state":"collecting","stage":"wt","ended":false,"voice_available":false,"source":"public"}
+```
+After confirmed report, actions contain only reporter-scoped {id,title,status,priority,source,anonymous,verifier,approved_by,followup_status}; priority is URGENT or null, source public, anonymous true, verifier.confidence_label LOW. Status values match normal Action. Approval follow-up is a persisted web message; it does not mean an SMS was delivered or a crew dispatched. Command /api/actions retains the full Action shape with source public and optional priority. Never mix Live public actions into historical Replay calculations; switch to Live to review them.
+
+Session expiry24h; text500characters; event_id128characters; max200newmessages/session. Creation caps:5/min global,2/min socket peer,20/day UTC buckets; messages30/min/token. Counters persist across restart. Unknown proxy clients share a conservative bucket; forwarded headers do not establish identity. Missing/invalid/expired token401, disabled public service404, unknown village/extra fields/missing consent422, duplicate event conflict409, rate cap429. Field identity, village, channel and live context are server-controlled; client extras cannot override them. Consent/readback confirms what was said, not field truth. Public reports always require human verification and never recalibrate the engine.
+
+## Phone Realtime transport and attended UAT extension
+- Config VOICE_ENGINE=twiml (default), realtime or auto. Configured key + realtime/auto uses GPT Realtime; otherwise normal TwiML. Default model gpt-realtime-2.1, voice marin. Keys never returned.
+- Authenticated POST /api/voice/twilio/twiml/start still accepts Twilio form fields and signed sid query. When enabled returns Connect/Stream; fallback=1 keeps the same HMAC/signature validation and requests the old TwiML path. Terminal calls return Hangup.
+- WS /api/voice/stream/{sid}: strong signed sid in PATH because Twilio Stream URLs do not support query parameters. Path is redacted before transport access logging. Connect includes matching custom Parameter sid. On start, streamSid/accountSid/callSid/mediaFormat are validated and callSid hash must match the persisted outgoing attempt. No unrelated call can use the stream.
+- Wire Twilio connected/start/media/mark/stop JSON events, PCMU8000Hz mono; upstream GA Realtime format audio/pcmu (no rate field), semantic_vad, transcription and shared dispatcher tools. Server stores channel voice transcripts and validates assistant transcript before releasing buffered audio. Readback confirmation requires playback mark acknowledgment and a subsequent standalone YA.
+- Three-minute server deadline plus Twilio TimeLimit180 for the Realtime call; never send Timeout. Pre-audio failure redirects once to signed TwiML; terminal timeout/goodbye never restarts a conversation. No new outbound call is created by fallback.
+- One additional CLI-only --realtime-uat attempt is authorized after the earlier completed two-call pair. It consumes persistent call count3 and its own one-use receipt; chosen contact/consent, cooldown and quiet hours still apply. No HTTP body can activate this exception.
+- GET /api/config now optionally includes public_reporting_enabled:true and public_report_url:"http://localhost:8001/lapor" (or explicitly enabled HTTPS tunnel origin). Frontend opens Live when public reporting is enabled. A localhost QR is labelled local and cannot be advertised as reachable from judges' phones.

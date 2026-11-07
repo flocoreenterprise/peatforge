@@ -206,7 +206,11 @@ class VoiceService:
         mode,day=state.get('mode','live'),state.get('day',0)
         return self.tools.get_village_status(row['village_id'],mode,day),state
 
-    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False):
+    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False):
+        if cli_realtime_uat:
+            if diagnostic or cli_uat_pair or os.environ.get('VOICE_ENGINE')!='realtime' or not os.environ.get('OPENAI_API_KEY','').strip():
+                raise ChannelUnavailable('Realtime UAT requires the configured real engine and its single dedicated flow')
+            uat=True
         if cli_uat_pair and not diagnostic:
             uat=True
         if diagnostic and uat:
@@ -227,8 +231,12 @@ class VoiceService:
             # Diagnostic risk bypass is reserved for the actual chosen consenting UAT contact.
             raise ChannelUnavailable('Diagnostic requires the chosen protected test recipient')
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
-        allowed,reason=(reserve_uat_pair(self.db,responder_id,policy_status.level,now,diagnostic) if cli_uat_pair and not mock else
-                        reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock)))
+        if cli_realtime_uat and not mock:
+            from .uat_realtime import reserve_realtime_uat
+            allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now)
+        else:
+            allowed,reason=(reserve_uat_pair(self.db,responder_id,policy_status.level,now,diagnostic) if cli_uat_pair and not mock else
+                            reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock)))
         call_id=identifier('vc')
         trace=context.get('trace_id') or identifier('t')
         if not allowed:
@@ -246,6 +254,9 @@ class VoiceService:
         self.db.set(self._key(sid),session)
         form={'To':phone,'From':self.settings.from_number,'Url':self.settings.base()+'/api/voice/twilio/twiml/start?'+urlencode({'sid':sid}),
               'StatusCallback':self.settings.base()+'/api/voice/twilio/status?'+urlencode({'sid':sid})}
+        if not diagnostic and os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime') and os.environ.get('OPENAI_API_KEY','').strip():
+            # Carrier duration cap survives relay disconnects and the TwiML fallback.
+            form['TimeLimit']='180'
         outcome='unknown'
         try:
             with httpx.Client(transport=self.transport,timeout=15,follow_redirects=False,trust_env=False,

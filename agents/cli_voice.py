@@ -45,7 +45,7 @@ async def run(args):
             if result['error_code'] is not None:
                 print('provider_error_code='+str(result['error_code']))
             return 0 if result['error_code'] is None else 1
-        result=voice.call(args.responder,args.diag,uat=args.uat,cli_uat_pair=args.uat_pair)
+        result=voice.call(args.responder,args.diag,uat=args.uat,cli_uat_pair=args.uat_pair,cli_realtime_uat=args.realtime_uat)
         print(result['status']+(' ('+result['reason']+')' if result.get('reason') else ''))
         return 0 if result['status'] in ('queued','mock') else 1
 
@@ -61,6 +61,7 @@ def main(argv=None):
     call.add_argument('--diag',action='store_true')
     call.add_argument('--uat',action='store_true',help='Consented normal Warden test; bypass risk threshold only')
     call.add_argument('--uat-pair',action='store_true',help='Explicit one diagnostic then normal UAT pair; CLI only')
+    call.add_argument('--realtime-uat',action='store_true',help='One authorized Realtime attempt after the completed pair; CLI only')
     status=commands.add_parser('status')
     status.add_argument('responder')
     args=parser.parse_args(argv)

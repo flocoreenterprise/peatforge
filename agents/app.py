@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Literal
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -31,7 +31,9 @@ from .field import FieldService
 from .security import SecurityHeaders
 from .voice import VoiceService,VoiceSettings
 from .realtime import Access,BrowserVoice,Settings as BrowserSettings
+from .phone_realtime import PhoneRealtime
 from .scout import decision,sms_policy
+from .public_reports import PublicReports,router as public_router
 from urllib.parse import parse_qs
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
@@ -193,8 +195,10 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.field=FieldService(database,app.state.channels)
         app.state.voice=VoiceService(database,app.state.tools,app.state.channels,app.state.warden,VoiceSettings.from_environment())
         app.state.browser_voice=BrowserVoice(database,app.state.tools,app.state.channels,app.state.voice,BrowserSettings.from_environment())
+        app.state.phone_realtime=PhoneRealtime(app.state.voice,app.state.browser_voice)
         app.state.channels.outbound_policy=lambda responder,channel:sms_policy(database,app.state.tools,responder,channel,
                                             datetime.fromtimestamp(app.state.voice.clock(),timezone.utc))
+        app.state.public_reports=PublicReports(app)
         app.state.brain = OfflineBrain()
         async def run_scout():
             while True:
@@ -471,7 +475,14 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             sid,identity,query=service.authenticate(path,raw_query,params,signature)
             if kind=='status':
                 return service.status(sid,identity,params)
-            xml=service.start(sid,identity) if kind=='start' else service.gather(sid,identity,query,params)
+            if app.state.phone_realtime.terminal(sid):
+                xml='<Response><Hangup /></Response>'
+            elif kind=='start':
+                xml=app.state.phone_realtime.start(sid,identity,fallback=query.get('fallback')==['1'])
+                if xml is None:
+                    xml=service.start(sid,identity)
+            else:
+                xml=service.gather(sid,identity,query,params)
             return Response(xml,media_type='application/xml')
         return await asyncio.to_thread(process)
 
@@ -486,6 +497,10 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     @app.post('/api/voice/twilio/status')
     async def voice_status(request:Request):
         return await voice_callback(request,'status')
+
+    @app.websocket('/api/voice/stream/{sid}')
+    async def phone_stream(socket:WebSocket,sid:str):
+        await app.state.phone_realtime.handle(socket,sid)
 
     @app.post('/api/channels/sms/inbound')
     async def sms_inbound(request: Request):
@@ -507,6 +522,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             return await asyncio.to_thread(channels.sms_inbound,event)
         except (ValueError, TypeError, RecursionError):
             return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
+
+    app.include_router(public_router())
 
     dist = (web_dist if web_dist is not None else Path(__file__).resolve().parent.parent / 'web' / 'dist').resolve()
     mime = {'.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',

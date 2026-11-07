@@ -329,6 +329,13 @@ class VoiceTests(unittest.TestCase):
         self.assertTrue('6281234567890' not in printed and 'private.test' not in printed and 'sid=secret' not in printed)
         self.assertIsNone(self.app.state.database.get('call-policy:r1'))
 
+    def test_realtime_call_has_carrier_duration_cap_without_trial_timeout(self):
+        with patch.dict('os.environ',{'VOICE_ENGINE':'realtime','OPENAI_API_KEY':'sk-test-not-a-real-provider-key'}):
+            self.assertEqual(self.voice.call('r1',uat=True)['status'],'queued')
+        form=parse_qs(self.requests[-1].content.decode())
+        self.assertEqual(form.get('TimeLimit'),['180'])
+        self.assertNotIn('Timeout',form)
+
     def test_failed_call_retains_only_safe_provider_error_code(self):
         self.voice.transport=httpx.MockTransport(lambda request:httpx.Response(400,json={'code':21215,'message':'private provider details','more_info':'https://private.test'}))
         self.assertEqual(self.voice.call('r1',uat=True)['status'],'failed')

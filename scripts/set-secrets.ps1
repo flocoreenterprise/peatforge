@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string[]]$Name, [switch]$GenerateMissingServerSecrets, [switch]$EnableUat, [switch]$OpenDemo, [string]$PublicBaseUrl)
+param([string[]]$Name, [switch]$GenerateMissingServerSecrets, [switch]$EnableUat, [switch]$OpenDemo, [string]$PublicBaseUrl, [ValidateSet('twiml','realtime','auto')][string]$VoiceEngine)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -125,7 +125,7 @@ function Invoke-SecretSetup {
 }
 
 function Initialize-UatSettings {
-    param([string]$Path, [bool]$GenerateMissing, [bool]$Enable, [string]$BaseUrl, [bool]$PublicDemo = $false)
+    param([string]$Path, [bool]$GenerateMissing, [bool]$Enable, [string]$BaseUrl, [bool]$PublicDemo = $false, [string]$Engine = '')
     $updates = [ordered]@{}
     $existing = @{}
     try {
@@ -147,6 +147,10 @@ function Initialize-UatSettings {
         }
         if ($Enable) { $updates['PUBLIC_DEMO']='false'; $updates['PEATFORGE_LIVE_CHANNELS']='true' }
         if ($PublicDemo) { $updates['PUBLIC_DEMO']='true' }
+        if ($Engine) {
+            if (-not (Test-SettingShape -SettingName 'VOICE_ENGINE' -Value $Engine)) { throw 'Invalid voice engine.' }
+            $updates['VOICE_ENGINE']=$Engine
+        }
         if ($BaseUrl) {
             if (-not (Test-SettingShape -SettingName 'PUBLIC_BASE_URL' -Value $BaseUrl)) { throw 'Invalid public base URL.' }
             $updates['PUBLIC_BASE_URL']=$BaseUrl
@@ -159,8 +163,8 @@ function Initialize-UatSettings {
 # Dot sourcing exposes helpers for isolated tests, without asking for real secrets.
 if ($MyInvocation.InvocationName -ne '.') {
     try {
-        if ($GenerateMissingServerSecrets -or $EnableUat -or $OpenDemo -or $PublicBaseUrl) {
-            Initialize-UatSettings -Path (Join-Path (Split-Path -Parent $PSScriptRoot) '.env') -GenerateMissing $GenerateMissingServerSecrets -Enable $EnableUat -BaseUrl $PublicBaseUrl -PublicDemo $OpenDemo
+        if ($GenerateMissingServerSecrets -or $EnableUat -or $OpenDemo -or $PublicBaseUrl -or $VoiceEngine) {
+            Initialize-UatSettings -Path (Join-Path (Split-Path -Parent $PSScriptRoot) '.env') -GenerateMissing $GenerateMissingServerSecrets -Enable $EnableUat -BaseUrl $PublicBaseUrl -PublicDemo $OpenDemo -Engine $VoiceEngine
         } else { Invoke-SecretSetup -SelectedNames $Name }
     }
     catch { Write-Error 'Konfigurasi gagal disimpan. Nilai tidak ditampilkan.' -ErrorAction Continue; exit 1 }

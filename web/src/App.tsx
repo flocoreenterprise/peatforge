@@ -12,6 +12,8 @@ import ReplayJumps from './replay/ReplayJumps';
 import { usePilot, dateLabel, replayDate, type Mode } from './map/pilot';
 import CommandSummary from './layout/CommandSummary';
 import './layout/command.css';
+import PublicReportPage from './public/PublicReportPage';
+import CommandPublicLink from './public/CommandPublicLink';
 
 type Tab = 'Desa' | 'Percakapan' | 'Jejak';
 const tabs = [{ name: 'Desa', icon: MapPin }, { name: 'Percakapan', icon: Phone }, { name: 'Jejak', icon: Workflow }] as const;
@@ -19,6 +21,7 @@ const tabs = [{ name: 'Desa', icon: MapPin }, { name: 'Percakapan', icon: Phone 
 function Brand() { return <div className="brand"><span className="brand-icon"><Waves size={23}/></span><span>peatforge<span className="brand-sub">COMMAND</span></span></div>; }
 
 export default function App() {
+  if (window.location.pathname.replace(/\/$/, '') === '/lapor') return <PublicReportPage/>;
   const field = /^\/f\/([^/]+)\/?$/.exec(window.location.pathname);
   if (field) return <FieldInbox token={field[1]}/>;
   return <CommandApp/>;
@@ -39,7 +42,7 @@ function CommandApp() {
   const [day, setDay] = useState(9);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectVillage = useCallback((id: string) => { setSelectedId(id); setTab('Desa'); }, []);
-  const [osmCanals, setOsmCanals] = useState<OsmCanals | null>(null);
+  const [osmCanals] = useState<OsmCanals>({ type: 'FeatureCollection', features: [], available: false, reason: 'Geometri OpenStreetMap belum tersedia; pengambilan ulang dihentikan untuk demo.' });
   const pilot = usePilot(phase === 'command' && !preview && scope === 'pilot', mode, day);
   const { villages, risk, hotspots, meta } = pilot;
   const selected = villages.find(v => v.id === selectedId) ?? villages[0];
@@ -47,33 +50,16 @@ function CommandApp() {
   const [connection, setConnection] = useState('');
   const scoutBanner = config?.public_demo ? '' : scoutError;
 
-  useEffect(() => {
-    if (phase !== 'command' || preview || scope !== 'pilot') return;
-    let active = true; let pending = false;
-    const controller = new AbortController();
-    const refresh = async () => {
-      if (pending) return; pending = true;
-      try {
-        const data = await api<OsmCanals>('/canals/osm', { signal: controller.signal });
-        if (active) setOsmCanals(data);
-      } catch { if (active) setOsmCanals({ type: 'FeatureCollection', features: [], available: false, reason: 'Geometri OpenStreetMap belum tersedia.' }); }
-      finally { pending = false; }
-    };
-    void refresh(); const timer = window.setInterval(() => void refresh(), 4000);
-    return () => { active = false; controller.abort(); clearInterval(timer); };
-  }, [phase, preview, scope]);
-
-
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('peatforge-theme', dark ? 'dark' : 'light'); }, [dark]);
   const initialize = useCallback(async () => {
     setError(''); setPhase('loading');
     try {
-      const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false) setMode('live'); setPreview(false); setPhase('command');
+      const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || next.public_reporting_enabled) setMode('live'); setPreview(false); setPhase('command');
     } catch (failure) {
       if (failure instanceof ApiError && (failure.status === 401 || failure.status === 403)) { setPhase('login'); return; }
       // Only unavailable services activate the labelled, read-only shell preview.
       try {
-        const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false) setMode('live'); setPreview(false); setPhase('command');
+        const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || next.public_reporting_enabled) setMode('live'); setPreview(false); setPhase('command');
       } catch (configFailure) {
         if (configFailure instanceof ApiError && (configFailure.status === 401 || configFailure.status === 403)) { setPhase('login'); setError('Masuk dengan PIN operator untuk melanjutkan.'); return; }
         setConfig(mockConfig); setPreview(true); setPhase('command');
@@ -133,7 +119,7 @@ function CommandApp() {
         <div className="command-mode-switch" role="group" aria-label="Mode waktu"><button aria-pressed={mode === 'live'} className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button aria-pressed={mode === 'replay'} className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>
         {mode === 'replay' && <><div className="command-day-control"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari putar ulang" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/></div>{selected && <div className="command-day-jump"><ReplayJumps villageId={selected.id} onJump={setDay} compact/></div>}</>}
       </div>}
-      <div className="command-topbar-actions"><span className="command-connection"><i className={connection || preview || pilot.error ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection || pilot.error ? 'Pembaruan tertunda' : pilot.synced ? `Diperbarui ${pilot.synced}` : 'Menghubungkan…'}</span>{themeButton}{preview ? <button className="icon-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={17}/></button> : !config?.public_demo && <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div>
+      <div className="command-topbar-actions">{config?.public_reporting_enabled && <CommandPublicLink url={config.public_report_url}/>}<span className="command-connection"><i className={connection || preview || pilot.error ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection || pilot.error ? 'Pembaruan tertunda' : pilot.synced ? `Diperbarui ${pilot.synced}` : 'Menghubungkan…'}</span>{themeButton}{preview ? <button className="icon-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={17}/></button> : !config?.public_demo && <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div>
     </header>
     {scope === 'national' ? <section className="command-national"><NationalView/></section> : <>
       <CommandSummary enabled={!preview} mode={mode} day={day} selectedDate={selectedDate} villages={villages} risk={risk} hotspots={hotspots} osmCanals={osmCanals} synced={pilot.synced} notice={connection || pilot.error || scoutBanner || (preview ? 'Pratinjau — API belum tersedia. Belum ada data operasional; pesan tidak dikirim.' : '')}/>
@@ -145,7 +131,7 @@ function CommandApp() {
         <div className="command-sheet">
           <aside className="command-decisions" aria-label="Keputusan semua desa">
             <header className="command-panel-heading"><span className="eyebrow">SEMUA DESA · {mode === 'replay' ? dateLabel(selectedDate) : 'KONDISI TERKINI'}</span><h1>Keputusan lapangan</h1><p>Periksa bukti dan manfaat model sebelum menyetujui tindakan. Disetujui belum berarti dilaksanakan.</p><span className="command-channel-status">{preview ? 'Pratinjau tanpa pengiriman' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.outbound === 'mock' || config?.mode === 'mock' ? 'Operator · kanal simulasi' : 'Operator · pengiriman diaktifkan'}</span></header>
-            <DecisionInbox mode={mode} day={day}/>
+            <DecisionInbox mode={mode} day={day} onShowLive={() => setMode('live')}/>
           </aside>
           <aside className="command-context" aria-label="Konteks desa terpilih">
             <header className="command-context-heading"><label htmlFor="command-village">Desa dipilih</label><select id="command-village" value={selected?.id ?? ''} disabled={!villages.length} onChange={event => selectVillage(event.target.value)}>{!villages.length && <option value="">Belum ada data desa</option>}{villages.map(village => <option key={village.id} value={village.id}>{village.name}</option>)}</select></header>
@@ -167,6 +153,3 @@ function Empty({ icon, title, text }: { icon: 'village' | 'phone' | 'trace'; tit
   const Icon = icon === 'village' ? Trees : icon === 'phone' ? Phone : Workflow;
   return <div className="empty-state"><div className="empty-icon"><Icon size={27}/></div><h3>{title}</h3><p>{text}</p></div>;
 }
-
-
-

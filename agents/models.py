@@ -80,6 +80,7 @@ class ObservationInput(Model):
     smoke_category: Literal['tidak','bau','terlihat','api'] | None = None
     place_text: str | None = Field(default=None,max_length=150)
     reported_words: dict[str,str] = Field(default_factory=dict)
+    source: Literal['field','public'] = 'field'
     evidence_type: Literal['numeric','qualitative'] = 'numeric'
     confidence_label: Literal['REPORTED','LOW'] = 'REPORTED'
 
@@ -88,7 +89,7 @@ class ObservationInput(Model):
         if any(key not in ('water','smoke','place') or len(value)>200 for key,value in self.reported_words.items()):
             raise ValueError('Invalid reported words')
         self.evidence_type='qualitative' if self.wt_cm is None else 'numeric'
-        self.confidence_label='LOW' if self.wt_cm is None else 'REPORTED'
+        self.confidence_label='LOW' if self.wt_cm is None or self.source=='public' else 'REPORTED'
         return self
 
 

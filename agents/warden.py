@@ -170,7 +170,7 @@ class Warden:
 
     def _handle(self, message: Inbound) -> dict:
         with self.db.connect() as connection:
-            responder = connection.execute('SELECT village_id FROM responders WHERE id=?', (message.responder_id,)).fetchone()
+            responder = connection.execute('SELECT village_id,role FROM responders WHERE id=?', (message.responder_id,)).fetchone()
         if not responder:
             raise ValueError('Unknown responder')
         key = self._key(message.responder_id)
@@ -242,6 +242,8 @@ class Warden:
                 facts={**facts,'reported_words':words}
             pending = dict(village_id=responder['village_id'], responder_id=message.responder_id,
                            mode=mode, day=day, landmark_id=landmark.landmark_id, note=message.text, **facts)
+            if responder['role']=='PUBLIC':
+                pending.update(source='public',anonymous=True,mode='live',day=0)
             observation = ObservationInput(**pending)
             state.pop('observation_id', None)
             state.pop('confirmation_receipt', None)

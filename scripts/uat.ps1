@@ -4,6 +4,7 @@ param(
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$Responder = 'uat1',
     [switch]$Consent,
     [switch]$UatPair,
+    [switch]$RealtimeUat,
     [string]$Text
 )
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,10 @@ switch ($Action) {
 if ($UatPair) {
     if ($Action -notin @('Call','Diagnostic')) { throw 'UatPair is only valid for the explicitly authorized diagnostic and call.' }
     $arguments += '--uat-pair'
+}
+if ($RealtimeUat) {
+    if ($Action -ne 'Call' -or $UatPair) { throw 'RealtimeUat is one dedicated authorized call, separate from the completed pair.' }
+    $arguments += '--realtime-uat'
 }
 Push-Location $repoRoot
 try {

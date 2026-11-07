@@ -107,3 +107,11 @@ Next: finishlayout→P0-Adispatcher→P0-Bpublicreport/QRwithhardcostguards→P0
 Cut: P1anywhere/volunteers andextendedReplay/cachefallback onlyafterP0green; freeze15:45,submission16:30.
 - Layout C+A: independent decision/map/context columns, combined WT/PFVI summary and critical jump, mobile341px scroll sheet/all5markers; build PASS, focused summary/canals/marker/replay19/scenario/inbox tests PASS; root193+41 PASS. Terra final local1440/1024/390 noP0/P1; Luna CTA P1 fixed/rechecked. Remaining P2 nits deferred; no more visual rechecks. New freeze14:00; P1anywhere/ReplaySeptember/offline/OSMretries/status cut.
 - P0-A dispatcher: neutral truthfulAI consent, three short observation prompts, LOW categories/free place/readback/newYA, bye-first, seen-fire safety in SMS+voice and URGENT human verification evennumeric reports; root199tests+41subtests PASS before final narrow fixes, latest focused20+44 PASS, inbox/build PASS. Luna2P1 fire-path findings fixed with regressions. No live provider calls.
+
+13:30 WIB
+Done: layout a2a3f44 and dispatcher b611b13 committed; origin/main up to date; core and focused regression checks pass.
+In progress: public reports/QR integration and protected Realtime phone relay; transcript/audio correlation fix under review.
+Blocked: public voice remains unavailable with text fallback; no tunnel or extra call until protected relay checks pass.
+Next: public workflow/security checks, endpoint examples, full suite13:55; one explicitly authorized Realtime phone UAT after green.
+Cut: status page, anywhere/volunteers, September Replay, offline mode, OSM retries; web freeze14:00, B6b alone may finish14:15.
+- Public reports + phone integration: scoped anonymous /lapor text/QR, LOW verify-only queue and scoped web followup; public voice intentionally503. Local isolated UI report->readbackYA->URGENTapprove->followup PASS. Protected phone relay has HMAC call binding, validated playback, strictresponse correlation,180sserver+carrier cap, terminal-safe TwiML fallback and one-use extraUAT. Full228tests+41subtests PASS, additional carrier-captest PASS, webbuild/publictests PASS, security31targetedPASS. Live GA session.updated accepted gpt-realtime-2.1/marin/PCMU without requesting audio; actual phone UAT next.

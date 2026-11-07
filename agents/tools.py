@@ -82,6 +82,11 @@ class ToolService:
         return Landmark(landmark_id=row['id'], name=row['name'], lat=row['lat'], lon=row['lon'], match_score=score, source=row['source'])
 
     def log_field_observation(self, observation: ObservationInput, *, observation_id: str | None = None, trace_id: str | None = None) -> dict[str, Any]:
+        with self.db.connect() as connection:
+            reporter=connection.execute('SELECT role FROM responders WHERE id=?',(observation.responder_id,)).fetchone()
+        public=bool(reporter and reporter['role']=='PUBLIC') or observation.source=='public'
+        if public:
+            observation=observation.model_copy(update={'source':'public','anonymous':True,'confidence_label':'LOW'})
         if not observation.confirmed:
             raise ValueError('Standalone confirmation required')
         observation_id = observation_id or identifier('o')
@@ -107,7 +112,9 @@ class ToolService:
         versions=history(observation.village_id) if history else []
         result['version']=versions[-1]['version'] if versions else None
         recalibrate=getattr(self.engine,'recalibrate',None)
-        if observation.mode=='live' and observation.wt_cm is not None:
+        if public:
+            result['reason']='public_report_requires_human_verification'
+        elif observation.mode=='live' and observation.wt_cm is not None:
             if difference is not None and difference>30:
                 result['reason']='discrepancy_requires_verification'
             elif recalibrate is not None:

@@ -130,3 +130,9 @@ Hard rules:
 - 13:15–13:30 P0-A dispatcherwording/tests;13:30–13:50minimalpublic/lapor+QR+hardcostguards/samequeue;13:50freshnesslabels onlyiftime, no/status.
 - 13:55fullsuite+cleancommit;14:00five-linedone/cutreport. After14:00fixP0only.
 - CUT:anywhere/volunteers,ReplaySeptember,offlinemode,OSMretries. Tunnelremainsclosedunlessrequested; noadditionalcalls.
+
+## Repository handoff and phone exception — latest user override
+- origin/main is public at github.com/flocoreenterprise/peatforge. After each green commit, git push origin main. No AI attribution, co-author trailers, or tool marks in commits/files.
+- After14:00 do not touch web/; frontend partner owns shell rework on frontend-rework against CONTRACT.md. Maintain exact endpoint request/response examples for handoff.
+- Dedicated parallel B6b builder owns new phone relay files; this explicitly permits disjoint writers in agents/. Other features freeze14:00, B6b only may finish14:15 then stop/fallback if not green.
+- One additional attended UAT call to configured consenting Telkomsel recipient explicitly authorized after relay green, VOICE_ENGINE=realtime, tunnel allowed for this UAT. No other call/SMS authorization. Local open operator remains isolated from signed public callback/stream ingress.

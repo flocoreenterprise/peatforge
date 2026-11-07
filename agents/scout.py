@@ -84,7 +84,7 @@ class Scout:
             output['reason']='active_replay_context'
             return output
         with self.db.connect() as connection:
-            responders=connection.execute('SELECT id FROM responders WHERE village_id=? ORDER BY tier,id',(status.village_id,)).fetchall()
+            responders=connection.execute("SELECT id FROM responders WHERE village_id=? AND role!='PUBLIC' ORDER BY tier,id",(status.village_id,)).fetchall()
         if not responders:
             output['reason']='no_responders'
             return output

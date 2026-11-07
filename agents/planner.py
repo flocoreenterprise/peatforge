@@ -69,13 +69,14 @@ class Planner:
             old = saved['old']
             checks = [{'name': 'confirmed', 'passed': observation['confirmed']}]
             difference = None if observation.get('wt_cm') is None or old.get('wt_cm') is None else abs(observation['wt_cm'] - old['wt_cm'])
+            public=observation.get('source')=='public'
             qualitative=observation.get('wt_cm') is None
             unknown_place=bool(observation.get('place_text') and not observation.get('landmark_id'))
-            hold = difference is not None and difference > 30 or qualitative or unknown_place or observation.get('fire') is True
+            hold = difference is not None and difference > 30 or qualitative or unknown_place or observation.get('fire') is True or public
             checks.append({'name': 'water_table_discrepancy', 'passed': None if difference is None else difference<=30,
                            'difference_cm': difference, 'limit_cm': 30, 'model_wt_cm': old.get('wt_cm'),
                            'observed_wt_cm': observation.get('wt_cm')})
-            if qualitative or unknown_place:
+            if qualitative or unknown_place or public:
                 hotspots={'available':False,'items':[],'reason':'Human verification required; no numeric inference from categories'}
             else:
                 try:
@@ -89,12 +90,12 @@ class Planner:
                            'reason': hotspots.get('reason'), 'note': 'Heat detections are not confirmed fires',
                            'mode': observation['mode'], 'day': observation['day']})
             decision = 'hold' if hold else ('forward_with_flag' if not available or not hotspots.get('items') else 'forward')
-            if qualitative or unknown_place:
+            if qualitative or unknown_place or public:
                 checks.append({'name':'reported_observation','passed':None,'confidence_label':'LOW','qualitative':qualitative,'place_unmapped':unknown_place})
-            verifier = {'decision': decision, 'checks': checks,'confidence_label':'LOW' if qualitative or unknown_place else 'REPORTED'}
+            verifier = {'decision': decision, 'checks': checks,'confidence_label':'LOW' if qualitative or unknown_place or public else 'REPORTED'}
             candidates = []
             if hold:
-                title='Perlu dicek: pengamatan warga' if qualitative or unknown_place else 'Perlu dicek: laporan berbeda dari model'
+                title='Laporan publik: perlu pemeriksaan' if public else 'Perlu dicek: pengamatan warga' if qualitative or unknown_place else 'Perlu dicek: laporan berbeda dari model'
                 action=self._base(observation,saved,'dispatch_verify','verify',title,verifier)
                 action.update(place_text=observation.get('place_text'),reported_words=observation.get('reported_words',{}),
                               water_category=observation.get('water_category'),smoke_category=observation.get('smoke_category'))
@@ -142,10 +143,10 @@ class Planner:
                 self.expire(connection)
                 for action in candidates:
                     action.pop('_rank', None)
-                    connection.execute("UPDATE actions SET status='superseded' WHERE village_id=? AND type=? AND status='proposed' AND json_extract(data,'$.mode')=?", (action['village_id'], action['type'], action['mode']))
+                    connection.execute("UPDATE actions SET status='superseded' WHERE village_id=? AND type=? AND status='proposed' AND json_extract(data,'$.mode')=? AND COALESCE(json_extract(data,'$.source'),'field')=? AND (?!='public' OR responder_id=?)", (action['village_id'], action['type'], action['mode'],action['source'],action['source'],action['responder_id']))
                     connection.execute('INSERT INTO actions(id,village_id,kind,type,status,benefit,approved_by,expires_at,observation_id,responder_id,anonymous,trace_id,data,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (action['id'], action['village_id'], action['kind'], action['type'], 'proposed', json.dumps(action['benefit'], allow_nan=False), None,
-                         action['expires_at'], action['observation_id'], action['responder_id'], 0, action['trace_id'], json.dumps(action, allow_nan=False), action['created_at']))
+                         action['expires_at'], action['observation_id'], action['responder_id'], int(action['anonymous']), action['trace_id'], json.dumps(action, allow_nan=False), action['created_at']))
                 trace=saved.get('trace_id')
                 record(self.db,'Verifier','evidence_checked',trace_id=trace,
                        input={'observation_id':saved['observation_id'],'village_id':observation['village_id'],'mode':observation['mode'],'day':observation['day']},
@@ -163,7 +164,7 @@ class Planner:
     def _base(self, observation, saved, action_type, kind, title, verifier) -> dict:
         return dict(id=identifier('a'), village_id=observation['village_id'], kind=kind, type=action_type,
                     status='proposed', title=title, reason='Laporan lapangan terkonfirmasi; pelaksanaan memerlukan persetujuan',
-                    observation_id=saved['observation_id'], responder_id=observation['responder_id'], anonymous=False,
+                    observation_id=saved['observation_id'], responder_id=observation['responder_id'], anonymous=observation.get('anonymous',False), source=observation.get('source','field'),
                     days_bought=None, at_least_days=None, benefit={'wt_gain_cm': None, 'pfvi_reduction': None},
                     verifier=verifier, created_at=self._now(), expires_at=(self.clock()+timedelta(hours=6)).isoformat().replace('+00:00','Z'),
                     trace_id=saved.get('trace_id'), approved_by=None, mode=observation['mode'], day=observation['day'])
@@ -196,7 +197,7 @@ class Planner:
                 if len(text) > 300:
                     raise ValueError('Follow-up exceeds message limit')
                 followup_id = 'm_followup_' + action_id
-                self.channels.enqueue(action['responder_id'],text,'sms',trace_id=action['trace_id'],idempotency_key=followup_id,connection=connection)
+                self.channels.enqueue(action['responder_id'],text,'web' if action.get('source')=='public' else 'sms',trace_id=action['trace_id'],idempotency_key=followup_id,connection=connection)
                 action['followup_message_id'] = followup_id
             connection.execute('UPDATE actions SET status=?,approved_by=?,data=? WHERE id=?',
                                (action['status'], action['approved_by'], json.dumps(action, allow_nan=False), action_id))
