@@ -104,6 +104,7 @@ Example objects referenced below are defined next. Routes marked optional are cu
 | GET /api/responders | O | village_id? | {"items":[Responder]} |
 | GET /api/responders/{id}/field-link | O | none | {"field_path":"/f/<opaque-token>"} (never log) |
 | GET /api/responders/{id}/messages | O | after? | {"items":[Message]} |
+| POST /api/demo/inbound | O, public_demo only | {"responder_id":"r1","text":"AIR 61 ASAP YA dekat kanal 4","mode":"replay","day":9} | {"items":[Message],"state":"confirm"}; SAME inbound pipeline as SMS, no real send |
 | POST /api/responders/{id}/send | O | {"text":"Pesan","channel":"sms"} | {"message_id":"m1","status":"mock"} |
 | POST /api/events/risk-changed | O | {"village_id":"62.11.01.2002","level_to":"TINGGI","mode":"replay","day":5,"hour_override":10} | {"trace_id":"t1","notified":1,"suppressed":0} |
 | GET /api/policy | O | none | {"max_calls_per_day":1,"quiet_hours":[21,5],"timezone":"Asia/Jakarta","default_channel":"sms","l3_requires_approval":true} |
@@ -232,6 +233,8 @@ Provider account readiness and delivery must be tested separately; shape validat
 
 Latest lead gate overrides older optional plans: start09:31, core by12:00, integration12:00-12:30, freeze13:00.
 Build only A3-A5 -> B3+B5/full mocked SMS loop -> C2-C4 now. A6/A7/national/C7/3D/Telegram/B6b/trace drawer/ask bar are CUT.
+Core browser demo uses operator message timeline plus public-demo-only inbound simulator; no full C6 field app or B8 auth rollout now.
+The shared access dependency allows publicdemo and fails closed for protected mode until PIN auth is implemented.
 Observation submission records evidence; adaptive recalibration is deferred, with no claim of adaptation in UI/pitch.
 Reference visuals only from user-supplied screenshots. Auditor max5min/block; integrated security before tunnel opening.
 
