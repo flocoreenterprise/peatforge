@@ -1,8 +1,9 @@
 """Server-owned Twilio/OpenAI relay. Never exposes provider credentials or raw errors.
 
 Integration: after normal VoiceService.authenticate(), use start() or old start().
-Mount handle(websocket, sid) on /api/voice/stream/{sid}. Twilio forbids URL
-queries. The full HMAC is verified before accept; custom Parameter binds scope.
+Mount handle(websocket) on /api/voice/stream. Twilio forbids URL queries.
+The first start frame carries the full HMAC capability in a custom Parameter;
+no provider connection or audio is allowed until HMAC and call binding pass.
 """
 import asyncio
 import base64
@@ -47,6 +48,8 @@ class PhoneRealtime:
         self.deadline = min(180, max(0.01, deadline))
         self._watchdogs={}
         self._closing=False
+        self._connections=0
+        self.handshake_timeout=5
 
     def enabled(self):
         return (os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime')
@@ -71,11 +74,11 @@ class PhoneRealtime:
                 self.voice.db.set(self.voice._key(sid),state)
         root = ET.Element('Response')
         stream = ET.SubElement(ET.SubElement(root,'Connect'),'Stream',
-                               url=self.voice.settings.base().replace('https://','wss://',1)+'/api/voice/stream/'+sid)
+                               url=self.voice.settings.base().replace('https://','wss://',1)+'/api/voice/stream')
         ET.SubElement(stream,'Parameter',name='sid',value=sid)
-        # REST installs the legacy flow only on an explicit pre-audio failure.
-        # If REST is unavailable, closing the stream advances directly to Hangup.
-        ET.SubElement(root,'Hangup')
+        # Audible recovery also covers stream setup failures before a start frame.
+        ET.SubElement(root,'Say',language='id-ID',voice='Google.id-ID-Standard-A').text="Maaf, sambungan suara terputus. Saya lanjutkan dengan suara cadangan."
+        ET.SubElement(root,'Redirect',method='POST').text=self.fallback_url(sid)
         return ET.tostring(root,encoding='unicode')
 
     async def arm_deadline(self, sid, call):
@@ -160,16 +163,33 @@ class PhoneRealtime:
     def fallback_url(self, sid):
         return self.voice.settings.base()+'/api/voice/twilio/twiml/start?'+urlencode({'sid':sid,'fallback':'1'})
 
-    def handshake_valid(self, websocket, sid):
+    def diagnostic(self, stage, reason=None):
+        """Only bounded categories/counts; never headers, URLs, capabilities or IDs."""
+        with self.voice._lock:
+            state=self.voice.db.get('phone-realtime-diagnostics',{})
+            state[stage]=min(1000000,state.get(stage,0)+1)
+            state['last_stage']=stage
+            if reason:
+                state['last_reason']=reason
+            self.voice.db.set('phone-realtime-diagnostics',state)
+
+    def handshake_valid(self, websocket):
         try:
-            if not verify_session(self.voice.settings,sid,now=self.voice.clock()):
+            if not re.fullmatch(r'[0-9a-fA-F]{32}',self.voice.settings.auth_token):
                 return False
-            signature = websocket.headers.get('x-twilio-signature')
+            base=self.voice.settings.base()+'/api/voice/stream'
+            signature=websocket.headers.get('x-twilio-signature')
             if signature is None:
+                # Socket is untrusted until the bounded first start frame verifies.
                 return True
-            expected = twilio_signature(self.voice.settings.auth_token,
-                                        self.voice.settings.base()+'/api/voice/stream/'+sid,{})
-            return bool(signature and hmac.compare_digest(signature,expected))
+            if not isinstance(signature,str) or len(signature)>200:
+                return False
+            # Twilio documents a WSS trailing slash signature discrepancy. These
+            # are the only accepted variants, all on the configured external origin.
+            urls=(base,base+'/',base.replace('https://','wss://',1),
+                  base.replace('https://','wss://',1)+'/')
+            return any(hmac.compare_digest(signature,twilio_signature(self.voice.settings.auth_token,url,{}))
+                       for url in urls)
         except Exception:
             return False
 
@@ -180,6 +200,11 @@ class PhoneRealtime:
         identity = verify_session(self.voice.settings,sid,now=self.voice.clock())
         if not identity or identity['diagnostic']:
             raise RelayError()
+        with self.voice._lock:
+            known=self.voice.db.get(self.voice._key(sid),{})
+            if known.get('responder_id')==identity['responder_id']:
+                known['stream_handshake_seen']=True
+                self.voice.db.set(self.voice._key(sid),known)
         call = start.get('callSid','')
         stream = start.get('streamSid','')
         if (not isinstance(call,str) or not re.fullmatch(r'CA[0-9a-fA-F]{32}',call)
@@ -198,6 +223,7 @@ class PhoneRealtime:
             if self.terminal(sid):
                 raise RelayError()
             state.setdefault('realtime_deadline',self.voice.clock()+self.deadline)
+            state['stream_handshake_seen']=True
             state['realtime_claimed'] = True
             self.voice.db.set(self.voice._key(sid),state)
         status,_ = self.voice._context(identity['responder_id'])
@@ -218,33 +244,44 @@ class PhoneRealtime:
         except Exception:
             return False
 
-    async def handle(self, websocket, sid):
-        if not self.handshake_valid(websocket,sid):
+    async def handle(self, websocket):
+        self.diagnostic('stream_handshake_seen')
+        if self._closing or self._connections>=8 or not self.handshake_valid(websocket):
+            self.diagnostic('stream_handshake_denied','signature_or_capacity')
             await websocket.close(code=1008)
             return
-        await websocket.accept()
+        self._connections+=1
+        try:
+            await websocket.accept()
+        except Exception:
+            self._connections-=1
+            self.diagnostic('stream_handshake_denied','accept_failed')
+            return
         provider = relay = binding = None
+        phase='start_invalid'
         try:
             async with asyncio.timeout(self.deadline):
-                for _ in range(3):
-                    frame = await asyncio.wait_for(websocket.receive_text(),5)
-                    if len(frame)>MAX_FRAME:
-                        raise RelayError()
-                    event = json.loads(frame)
-                    if event.get('event')=='start':
-                        start=event.get('start',{})
-                        if start.get('customParameters',{}).get('sid') != sid:
+                async with asyncio.timeout(self.handshake_timeout):
+                    for _ in range(3):
+                        frame = await websocket.receive_text()
+                        if len(frame)>4096:
                             raise RelayError()
-                        binding = self.bind(start)
-                        break
-                    if event.get('event')!='connected':
-                        raise RelayError()
+                        event = json.loads(frame)
+                        if event.get('event')=='start':
+                            binding = self.bind(event.get('start',{}))
+                            self.diagnostic('stream_start_bound')
+                            break
+                        if event.get('event')!='connected':
+                            raise RelayError()
                 if binding is None:
                     raise RelayError()
                 sid,call,stream,access,session_id = binding
                 if not self.enabled():
                     raise RelayError()
+                phase='provider_unavailable'
                 provider = await self.connector(self.browser.settings)
+                self.diagnostic('stream_provider_connected')
+                phase='relay_error'
                 relay = PhoneRelay(self,websocket,provider,*binding)
                 state=self.voice.db.get(self.voice._key(sid),{})
                 remaining=max(0,state['realtime_deadline']-self.voice.clock())
@@ -253,6 +290,7 @@ class PhoneRealtime:
                 if relay.audio_sent or relay.ending:
                     self.finish(sid)
         except TimeoutError:
+            self.diagnostic('stream_failed','deadline' if binding else 'start_timeout')
             if binding:
                 self.finish(binding[0])
             if provider is not None:
@@ -263,6 +301,7 @@ class PhoneRealtime:
             if binding:
                 await self.update_call(binding[1],{'Status':'completed'})
         except (Exception, asyncio.CancelledError):
+            self.diagnostic('stream_failed',phase)
             # No exception text enters logs, frames, traces, or REST data.
             if binding:
                 sid,call,_,_,_ = binding
@@ -276,6 +315,7 @@ class PhoneRealtime:
                     self.finish(sid)
                     await self.update_call(call,{'Status':'completed'})
         finally:
+            self._connections-=1
             if provider is not None:
                 try:
                     await provider.close()

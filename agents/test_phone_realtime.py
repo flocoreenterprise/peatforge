@@ -89,10 +89,11 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_start_connect_and_unconfigured_nonlooping_fallback(self):
         xml=self.phone.start(self.sid,self.identity)
         self.assertIn('<Connect>',xml)
-        self.assertIn('/api/voice/stream/'+self.sid,xml)
+        self.assertIn('url="wss://phone.example.test/api/voice/stream"',xml)
         self.assertIn('<Parameter name="sid"',xml)
-        self.assertIn('<Hangup',xml)
-        self.assertNotIn('<Redirect',xml)
+        self.assertIn('<Say',xml)
+        self.assertIn('<Redirect',xml)
+        self.assertIn('fallback=1',xml)
         self.assertNotIn('Timeout',xml)
         self.assertIsNone(self.phone.start(self.sid,self.identity,fallback=True))
         self.browser.settings.key=''
@@ -101,18 +102,18 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
             self.phone.start('invalid',self.identity,fallback=True)
 
     async def test_invalid_sid_rejected_before_accept_and_before_provider(self):
-        ws=Socket()
+        ws=Socket([self.start_frame(customParameters={'sid':'invalid'})])
         self.phone.connector=AsyncMock()
-        await self.phone.handle(ws,'invalid')
-        self.assertFalse(ws.accepted)
+        await self.phone.handle(ws)
+        self.assertTrue(ws.accepted)
         self.assertTrue(ws.closed)
         self.phone.connector.assert_not_called()
 
     async def test_handshake_signature_and_scope_binding(self):
-        self.assertTrue(self.phone.handshake_valid(Socket(),self.sid))
-        self.assertFalse(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':'wrong'}),self.sid))
-        signature=twilio_signature(self.voice.settings.auth_token,self.voice.settings.base()+'/api/voice/stream/'+self.sid,{})
-        self.assertTrue(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':signature}),self.sid))
+        self.assertTrue(self.phone.handshake_valid(Socket()))
+        self.assertFalse(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':'wrong'})))
+        signature=twilio_signature(self.voice.settings.auth_token,self.voice.settings.base()+'/api/voice/stream',{})
+        self.assertTrue(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':signature})))
         for changes in ({'callSid':'CA'+'d'*32},{'accountSid':'AC'+'d'*32},{'streamSid':'arbitrary'},
                         {'mediaFormat':{'encoding':'audio/pcm','sampleRate':8000,'channels':1}}):
             with self.assertRaises(RelayError):
@@ -174,7 +175,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError('sk-do-not-return-provider-error')
         self.phone.connector=fail
         ws=Socket([self.start_frame()])
-        await self.phone.handle(ws,self.sid)
+        await self.phone.handle(ws)
         self.phone.update_call.assert_awaited_once_with(CALL,{'Url':self.phone.fallback_url(self.sid),'Method':'POST'})
         self.assertTrue(ws.closed)
         self.assertTrue(self.voice.db.get(self.voice._key(self.sid))['realtime_fallback'])
@@ -183,7 +184,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_unconfigured_stream_falls_back_without_upstream(self):
         self.browser.settings.key=''
         self.phone.connector=AsyncMock()
-        await self.phone.handle(Socket([self.start_frame()]),self.sid)
+        await self.phone.handle(Socket([self.start_frame()]))
         self.phone.connector.assert_not_called()
         self.phone.update_call.assert_awaited_once()
 
@@ -191,7 +192,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         provider=Socket()
         self.phone.connector=AsyncMock(return_value=provider)
         self.phone.deadline=0.02
-        await self.phone.handle(Socket([self.start_frame()]),self.sid)
+        await self.phone.handle(Socket([self.start_frame()]))
         self.phone.update_call.assert_awaited_once_with(CALL,{'Status':'completed'})
         self.assertTrue(provider.closed)
         update=provider.sent[0]['session']
@@ -278,7 +279,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.phone.connector=AsyncMock(return_value=provider)
         self.phone.update_call=AsyncMock(return_value=False)
         self.phone.deadline=0.02
-        await self.phone.handle(Socket([self.start_frame()]),self.sid)
+        await self.phone.handle(Socket([self.start_frame()]))
         self.assertIn('<Hangup',self.phone.start(self.sid,self.identity,fallback=True))
         self.assertTrue(self.voice.db.get(self.voice._key(self.sid))['realtime_terminal'])
         self.assertTrue(provider.closed)
@@ -316,7 +317,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         provider.send=provider_send
         twilio.send_json=twilio_send
         self.phone.connector=AsyncMock(return_value=provider)
-        await asyncio.wait_for(self.phone.handle(twilio,self.sid),1)
+        await asyncio.wait_for(self.phone.handle(twilio),1)
         self.assertTrue(twilio.accepted and twilio.closed and provider.closed)
         self.assertIn({'type':'input_audio_buffer.append','audio':AUDIO},provider.sent)
         self.assertEqual([event['event'] for event in twilio.sent],['media','mark'])
@@ -381,7 +382,7 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         task=list(self.phone._watchdogs.values())[0][0]
         self.phone.connector=AsyncMock(side_effect=RuntimeError('private-provider-failure'))
         ws=Socket([self.start_frame()])
-        await self.phone.handle(ws,self.sid)
+        await self.phone.handle(ws)
         self.assertTrue(ws.closed)
         self.assertFalse(task.done())
         self.assertIsNone(self.phone.start(self.sid,self.identity,fallback=True))
@@ -391,3 +392,37 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
             (CALL,{'Url':self.phone.fallback_url(self.sid),'Method':'POST'}))
         self.assertEqual(self.phone.update_call.await_args_list[1].args,(CALL,{'Status':'completed'}))
         self.assertTrue(self.phone.terminal(self.sid))
+
+    async def test_plain_handshake_accepts_only_configured_origin_signature_variants(self):
+        base=self.voice.settings.base()+'/api/voice/stream'
+        for url in (base,base+'/',base.replace('https://','wss://'),base.replace('https://','wss://')+'/'):
+            signature=twilio_signature(self.voice.settings.auth_token,url,{})
+            self.assertTrue(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':signature})),url)
+        foreign=twilio_signature(self.voice.settings.auth_token,'wss://other.example/api/voice/stream',{})
+        self.assertFalse(self.phone.handshake_valid(Socket(headers={'x-twilio-signature':foreign})))
+
+    async def test_plain_stream_bad_signature_or_missing_sid_never_connect_provider(self):
+        self.phone.connector=AsyncMock()
+        bad=Socket([self.start_frame()],headers={'x-twilio-signature':'wrong'})
+        await self.phone.handle(bad)
+        self.assertFalse(bad.accepted)
+        missing=Socket([self.start_frame(customParameters={})])
+        await self.phone.handle(missing)
+        self.assertTrue(missing.accepted and missing.closed)
+        self.phone.connector.assert_not_called()
+        diagnostics=self.voice.db.get('phone-realtime-diagnostics')
+        self.assertEqual(diagnostics['stream_handshake_seen'],2)
+        self.assertEqual(diagnostics['stream_handshake_denied'],1)
+        self.assertEqual(diagnostics['last_reason'],'start_invalid')
+        self.assertNotIn(self.sid,json.dumps(diagnostics))
+        self.assertNotIn(CALL,json.dumps(diagnostics))
+
+    async def test_unauthenticated_plain_stream_is_bounded_by_first_frame_deadline(self):
+        self.phone.handshake_timeout=0.01
+        self.phone.connector=AsyncMock()
+        ws=Socket()
+        await asyncio.wait_for(self.phone.handle(ws),1)
+        self.assertTrue(ws.accepted and ws.closed)
+        self.phone.connector.assert_not_called()
+        self.assertEqual(self.phone._connections,0)
+        self.assertEqual(self.voice.db.get('phone-realtime-diagnostics')['last_reason'],'start_timeout')

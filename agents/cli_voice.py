@@ -46,7 +46,8 @@ async def run(args):
                 print('provider_error_code='+str(result['error_code']))
             return 0 if result['error_code'] is None else 1
         result=voice.call(args.responder,args.diag,uat=args.uat,cli_uat_pair=args.uat_pair,cli_realtime_uat=args.realtime_uat,
-                          cli_retry_rejected=args.retry_rejected_realtime,server_limit_only=args.server_limit_only)
+                          cli_retry_rejected=args.retry_rejected_realtime,server_limit_only=args.server_limit_only,
+                          cli_stream_repair=args.stream_repair_uat)
         print(result['status']+(' ('+result['reason']+')' if result.get('reason') else ''))
         return 0 if result['status'] in ('queued','mock') else 1
 
@@ -64,6 +65,7 @@ def main(argv=None):
     call.add_argument('--uat-pair',action='store_true',help='Explicit one diagnostic then normal UAT pair; CLI only')
     call.add_argument('--realtime-uat',action='store_true',help='One authorized Realtime attempt after the completed pair; CLI only')
     call.add_argument('--retry-rejected-realtime',action='store_true',help='One explicit retry only after definitive creation rejection without a call SID')
+    call.add_argument('--stream-repair-uat',action='store_true',help='One authorized repair call after the previous Realtime call completed; requires --realtime-uat --server-limit-only')
     call.add_argument('--server-limit-only',action='store_true',help='Attended UAT only: omit carrier TimeLimit; server deadline still applies, REST termination is network-dependent')
     status=commands.add_parser('status')
     status.add_argument('responder')

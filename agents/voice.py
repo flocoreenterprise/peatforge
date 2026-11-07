@@ -206,8 +206,10 @@ class VoiceService:
         mode,day=state.get('mode','live'),state.get('day',0)
         return self.tools.get_village_status(row['village_id'],mode,day),state
 
-    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False,cli_retry_rejected=False,server_limit_only=False):
-        if (cli_retry_rejected or server_limit_only) and not cli_realtime_uat:
+    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False,cli_retry_rejected=False,server_limit_only=False,cli_stream_repair=False):
+        if cli_stream_repair and (not cli_realtime_uat or not server_limit_only or cli_retry_rejected or cli_uat_pair or diagnostic):
+            raise ChannelUnavailable('Choose the dedicated attended stream repair flow')
+        if (cli_retry_rejected or server_limit_only or cli_stream_repair) and not cli_realtime_uat:
             raise ChannelUnavailable('Dedicated attended Realtime UAT required')
         if cli_realtime_uat:
             if diagnostic or cli_uat_pair or os.environ.get('VOICE_ENGINE')!='realtime' or not os.environ.get('OPENAI_API_KEY','').strip():
@@ -235,7 +237,7 @@ class VoiceService:
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
         if cli_realtime_uat and not mock:
             from .uat_realtime import reserve_realtime_uat
-            allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now,retry_rejected=cli_retry_rejected)
+            allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now,retry_rejected=cli_retry_rejected,stream_repair=cli_stream_repair)
         else:
             allowed,reason=(reserve_uat_pair(self.db,responder_id,policy_status.level,now,diagnostic) if cli_uat_pair and not mock else
                             reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock)))

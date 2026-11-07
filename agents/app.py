@@ -501,9 +501,9 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     async def voice_status(request:Request):
         return await voice_callback(request,'status')
 
-    @app.websocket('/api/voice/stream/{sid}')
-    async def phone_stream(socket:WebSocket,sid:str):
-        await app.state.phone_realtime.handle(socket,sid)
+    @app.websocket('/api/voice/stream')
+    async def phone_stream(socket:WebSocket):
+        await app.state.phone_realtime.handle(socket)
 
     @app.post('/api/channels/sms/inbound')
     async def sms_inbound(request: Request):

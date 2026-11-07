@@ -18,6 +18,7 @@ from .app import create_app
 from .channels import ChannelUnavailable
 from .cli_voice import main as voice_main
 from .mock_engine import VILLAGE_ID
+from .scout import WIB
 from .tools import seed_mock
 from .voice import SID_TTL,VoiceSettings,sign_session,twilio_signature,verify_session
 
@@ -335,6 +336,27 @@ class VoiceTests(unittest.TestCase):
         form=parse_qs(self.requests[-1].content.decode())
         self.assertEqual(form.get('TimeLimit'),['180'])
         self.assertNotIn('Timeout',form)
+
+    def test_stream_repair_is_cli_only_chosen_and_one_use_without_carrier_cap(self):
+        from .events import record
+        today=self.now.astimezone(WIB).date().isoformat()
+        self.app.state.database.set('call-policy:r1',{'date':today,'count':3,'last_call':self.now.timestamp()-61})
+        self.app.state.database.set('uat-pair:r1',{'date':today,'count':2,'phase':'complete'})
+        self.app.state.database.set('uat-realtime:r1',{'date':today,'reserved_at':self.now.timestamp()-61})
+        record(self.app.state.database,'Warden','call_requested',trace_id=None,input={'responder_id':'r1'},output={'call_id':'previous','status':'queued'})
+        self.app.state.database.set('voice-session:previous',{'responder_id':'r1','call_id':'previous','status':'queued','provider_status':'completed'})
+        with patch.dict('os.environ',{'VOICE_ENGINE':'realtime','OPENAI_API_KEY':'sk-offline-test'}):
+            for kwargs in ({'cli_stream_repair':True},{'cli_stream_repair':True,'cli_realtime_uat':True},
+                           {'cli_stream_repair':True,'cli_realtime_uat':True,'server_limit_only':True,'cli_retry_rejected':True}):
+                with self.assertRaises(ChannelUnavailable):
+                    self.voice.call('r1',**kwargs)
+            result=self.voice.call('r1',cli_realtime_uat=True,server_limit_only=True,cli_stream_repair=True)
+            self.assertEqual(result['status'],'queued')
+            self.assertEqual(self.voice.call('r1',cli_realtime_uat=True,server_limit_only=True,cli_stream_repair=True)['status'],'suppressed')
+        self.assertEqual(len(self.requests),1)
+        self.assertNotIn('TimeLimit',parse_qs(self.requests[0].content.decode()))
+        self.assertEqual(self.app.state.database.get('call-policy:r1')['count'],4)
+        self.assertEqual(self.client.post('/api/voice/twilio/call',json={'responder_id':'r1','cli_stream_repair':True}).status_code,422)
 
     def test_failed_call_retains_only_safe_provider_error_code(self):
         self.voice.transport=httpx.MockTransport(lambda request:httpx.Response(400,json={'code':21215,'message':'private provider details','more_info':'https://private.test'}))

@@ -73,7 +73,7 @@ def test_phone_ingress_is_explicit_isolated_and_redacted():
         @api.websocket('/{path:path}')
         async def ws(socket:WebSocket):
             await socket.accept()
-            await socket.send_json({'store':label,'redacted':socket.scope['path']=='/api/voice/stream/[redacted]'})
+            await socket.send_json({'store':label,'plain':socket.scope['path']=='/api/voice/stream'})
             await socket.close()
         return api
     gateway=Boundary(PublicIngress(tagged('public'),tagged('protected')),port=8001,public=True,phone=True)
@@ -83,8 +83,11 @@ def test_phone_ingress_is_explicit_isolated_and_redacted():
     assert client.post('/api/voice/twilio/call').status_code==404
     assert client.get('/api/voice/twilio/twiml/start').status_code==404
     sid='v1.Y2hvc2Vu.1794027600.'+'a'*32+'.2.'+'b'*64
-    with client.websocket_connect('ws://localhost:8001/api/voice/stream/'+sid) as socket:
-        assert socket.receive_json()=={'store':'protected','redacted':True}
+    with client.websocket_connect('ws://localhost:8001/api/voice/stream') as socket:
+        assert socket.receive_json()=={'store':'protected','plain':True}
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('ws://localhost:8001/api/voice/stream?sid='+sid):
+            pass
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect('ws://localhost:8001/api/voice/stream/invalid'):
             pass

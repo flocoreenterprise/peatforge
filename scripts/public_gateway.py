@@ -13,7 +13,7 @@ PUBLIC_HTTP = {
 }
 PUBLIC_WS = '/api/public/voice/stream'
 PHONE_HTTP=frozenset(('/api/voice/twilio/twiml/start','/api/voice/twilio/twiml/gather','/api/voice/twilio/status'))
-PHONE_PATH=re.compile(r'/api/voice/stream/v1\.[A-Za-z0-9_-]{1,107}\.[0-9]{10}\.[0-9a-f]{32}\.[012]\.[0-9a-f]{64}')
+PHONE_PATH=re.compile(r'/api/voice/stream')
 
 
 def authorities(port, public_base=''):

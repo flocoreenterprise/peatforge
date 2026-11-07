@@ -4,7 +4,9 @@ from datetime import datetime
 from .scout import WIB, decision
 
 
-def reserve_realtime_uat(database, responder_id, level, now, *, retry_rejected=False):
+def reserve_realtime_uat(database, responder_id, level, now, *, retry_rejected=False, stream_repair=False):
+    if retry_rejected and stream_repair:
+        return False,'realtime_uat_flags_conflict'
     today=now.astimezone(WIB).date().isoformat()
     key='call-policy:'+responder_id
     receipt='uat-realtime:'+responder_id
@@ -14,6 +16,33 @@ def reserve_realtime_uat(database, responder_id, level, now, *, retry_rejected=F
             row=connection.execute('SELECT value FROM kv WHERE key=?',(name,)).fetchone()
             return json.loads(row['value']) if row else {}
         state,pair,used=read(key),read('uat-pair:'+responder_id),read(receipt)
+        if stream_repair:
+            repair_key='uat-stream-repair:'+responder_id
+            if (used.get('date')!=today or state.get('date')!=today or state.get('count')!=3
+                    or pair.get('date')!=today or pair.get('count')!=2 or pair.get('phase')!='complete'
+                    or read(repair_key).get('date')==today):
+                return False,'stream_repair_uat_unavailable'
+            records=connection.execute("SELECT input,output,created_at FROM agent_events WHERE event='call_requested' ORDER BY created_at DESC,rowid DESC").fetchall()
+            attempt=next((row for row in records if json.loads(row['input']).get('responder_id')==responder_id),None)
+            if not attempt or datetime.fromisoformat(attempt['created_at'].replace('Z','+00:00')).timestamp()<used.get('reserved_at',float('inf')):
+                return False,'stream_repair_requires_completed_call'
+            call_id=json.loads(attempt['output']).get('call_id')
+            sessions=[json.loads(row['value']) for row in connection.execute("SELECT value FROM kv WHERE key LIKE 'voice-session:%'")]
+            previous=next((entry for entry in sessions if entry.get('call_id')==call_id),None)
+            if not previous or previous.get('provider_status')!='completed':
+                return False,'stream_repair_requires_completed_call'
+            terminal={'completed','busy','failed','no-answer','canceled'}
+            if any((entry['provider_status'] not in terminal if entry.get('provider_status')
+                    else entry.get('status')!='failed') for entry in sessions):
+                return False,'stream_repair_active_call'
+            allowed,reason=decision('voice',level,now,calls_today=0,last_call=state.get('last_call'),risk_override=True)
+            if not allowed:
+                return False,reason
+            state.update(count=4,last_call=now.timestamp())
+            connection.execute('UPDATE kv SET value=? WHERE key=?',(json.dumps(state),key))
+            connection.execute('INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                (repair_key,json.dumps({'date':today,'reserved_at':now.timestamp(),'previous_call_id':call_id})))
+            return True,'allowed_one_stream_repair_uat'
         if retry_rejected:
             if used.get('date')!=today or used.get('rejected_retry_used') or state.get('date')!=today or state.get('count')!=3:
                 return False,'realtime_retry_unavailable'

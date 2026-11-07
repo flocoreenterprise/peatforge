@@ -60,3 +60,47 @@ def test_manual_retry_rejects_callback_or_stream_activity_even_without_hash(tmp_
     record(db,'Warden','call_requested',trace_id=None,input={'responder_id':'chosen'},output={'call_id':'accepted','status':'failed'})
     db.set('voice-session:fake2',{'call_id':'accepted','status':'failed','provider_hash':'already-created'})
     assert not reserve_realtime_uat(db,'chosen','RENDAH',now+timedelta(seconds=61),retry_rejected=True)[0]
+
+
+def repair_prepared(tmp_path):
+    db,now=prepared(tmp_path)
+    assert reserve_realtime_uat(db,'chosen','RENDAH',now)[0]
+    record(db,'Warden','call_requested',trace_id=None,input={'responder_id':'chosen'},output={'call_id':'previous','status':'queued'})
+    with db.connect() as connection:
+        connection.execute("UPDATE agent_events SET created_at='2026-11-07T06:00:01Z' WHERE event='call_requested'")
+    db.set('voice-session:previous',{'responder_id':'chosen','call_id':'previous','status':'queued','provider_status':'completed'})
+    return db,now+timedelta(seconds=61)
+
+
+def test_stream_repair_one_atomic_persistent_fourth_attempt(tmp_path):
+    db,now=repair_prepared(tmp_path)
+    with ThreadPoolExecutor(4) as pool:
+        results=list(pool.map(lambda _:reserve_realtime_uat(db,'chosen','RENDAH',now,stream_repair=True),range(4)))
+    assert sum(result[0] for result in results)==1
+    assert db.get('call-policy:chosen')['count']==4
+    assert db.get('uat-stream-repair:chosen')['previous_call_id']=='previous'
+    assert not reserve_realtime_uat(Database(db.path),'chosen','EKSTREM',now+timedelta(minutes=1),stream_repair=True)[0]
+
+
+def test_stream_repair_requires_completed_latest_call_and_no_active_call(tmp_path):
+    db,now=repair_prepared(tmp_path)
+    for status in ('queued','in-progress','failed',None):
+        db.set('voice-session:previous',{'call_id':'previous','status':'queued','provider_status':status})
+        assert not reserve_realtime_uat(db,'chosen','RENDAH',now,stream_repair=True)[0]
+    db.set('voice-session:previous',{'call_id':'previous','status':'queued','provider_status':'completed'})
+    for session in ({'status':'unknown'},{'status':'queued','provider_status':'ringing'},
+                    {'status':'failed','provider_status':'in-progress'}):
+        db.set('voice-session:other',session)
+        assert reserve_realtime_uat(db,'chosen','RENDAH',now,stream_repair=True)==(False,'stream_repair_active_call')
+    db.set('voice-session:other',{'status':'failed'})
+    assert reserve_realtime_uat(db,'chosen','RENDAH',now,stream_repair=True)[0]
+
+
+def test_stream_repair_preserves_quiet_cooldown_day_and_flags(tmp_path):
+    db,now=repair_prepared(tmp_path)
+    for moment in (now-timedelta(seconds=60),now.replace(hour=15),now+timedelta(days=1)):
+        assert not reserve_realtime_uat(db,'chosen','RENDAH',moment,stream_repair=True)[0]
+    assert not reserve_realtime_uat(db,'unrelated','EKSTREM',now,stream_repair=True)[0]
+    assert not reserve_realtime_uat(db,'chosen','EKSTREM',now,stream_repair=True,retry_rejected=True)[0]
+    assert db.get('call-policy:chosen')['count']==3
+    assert db.get('uat-stream-repair:chosen') is None

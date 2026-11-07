@@ -136,3 +136,8 @@ Hard rules:
 - After14:00 do not touch web/; frontend partner owns shell rework on frontend-rework against CONTRACT.md. Maintain exact endpoint request/response examples for handoff.
 - Dedicated parallel B6b builder owns new phone relay files; this explicitly permits disjoint writers in agents/. Other features freeze14:00, B6b only may finish14:15 then stop/fallback if not green.
 - One additional attended UAT call to configured consenting Telkomsel recipient explicitly authorized after relay green, VOICE_ENGINE=realtime, tunnel allowed for this UAT. No other call/SMS authorization. Local open operator remains isolated from signed public callback/stream ingress.
+
+## Attended stream repair and fire-event QA — latest override
+- User authorized one more attended Realtime phone call after plain stream URL/custom Parameter and audible fallback repair; finish this UAT before A7 work. No further calls without explicit request.
+- Then reimplement A7 from scratch in engine/, classified events/API and minimal web labels/badges only; no layout changes. This explicitly reopens the requested web labels despite earlier freeze. New block must be green by15:00 then freeze. Never open rehearsal. Sol builders, Luna five-minute audit, tests, commit and push; CONTRACT exact examples required.
+- Fire classifications are model/rule-based candidates, not confirmed fires. Unavailable vegetation/peat/OSM evidence stays uncertain; never invent land cover or seasonal evidence.
