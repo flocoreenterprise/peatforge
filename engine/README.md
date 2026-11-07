@@ -153,8 +153,8 @@ crossing). Both retain horizon-end water/PFVI benefit. A block raises the shared
 strip boundary once regardless of number of fixture target IDs; effects are
 not multiplied. Pump standby/verification have no invented hydraulic effect.
 Replay hotspots are unavailable without archival data; current detections are
-never substituted. Backtest and adaptive recalibration are deferred; parameter
-history contains the initial version only.
+never substituted. Backtest remains deferred. A6 below adds bounded initial-condition assimilation
+and versioned parameter history; it does not calibrate K/Sy.
 
 Manual provider verification 2026-11-07: all five correct-coordinate archives
 had 76 rows and zero missing rain/ET0/temperature/soil-moisture values. Talio
@@ -178,7 +178,7 @@ Routes cover villages, status/forecast/simulate, canals/resources, initial
 parameter history, risk point GeoJSON, hotspots, replay metadata/day plus scenario
 alias, unavailable backtest, and POST warmup. All response shapes retain the
 contract; full provider/cache/model assumptions are available on status/simulation.
-No observations/adaptive route is added because A6 was cut. There is no import-time
+The observations write route belongs to the agents application; engine API exposes parameter history. There is no import-time
 service initialization or network. Parent auth exceptions preserve their status.
 
 Inputs are bounded to the available 14-day horizon and 62-day replay window.
@@ -192,3 +192,45 @@ real-cache verification explicitly disabled network fetches in its injected cach
 The real-cache TestClient returned200 for Talio live/replay status and replayday9
 simulation, preserving the independently verified exact one-day result. No
 second deployed server or tunnel was started for this verification.
+
+A6 confirmed WT assimilation (reopened by user):
+
+```python
+service = EngineService(ingest, state_path=scoped_path)  # None means memory only
+result = service.recalibrate(village_id, observation_dict, observation_id)
+```
+
+The agents owner supplies its public-demo/protected scoped persistence path and
+owns `/api/observations`. The engine accepts `confirmed=True`, finite WT0..150cm,
+matching village and a persistent unique observation ID. Live day must be zero.
+A disagreement over30cm returns `discrepancy_requires_verification`, preserves
+the pre-update model and does not adapt. Replay always returns
+`replay_skips_recalibration` without changing parameters, history, confidence or
+adaptive persistence. Replay also ignores previously accepted live corrections.
+
+Accepted observations adjust the village's forecast INITIAL WT CONDITION by at
+most15cm per observation, bounded0..150cm overall. This is state assimilation,
+not calibration of conductivity/specific yield from one point. K/Sy and PFVI
+retention parameters stay unchanged. The actual groundwater and PFVI trajectories
+are recomputed, including subsequent intervention simulations. Results retain
+old/new strict Status snapshots, version, reason, observed WT, pre-update residual
+and applied initial-WT delta. Output remains modelled; accepted-observation
+confidence0.7 is explicitly heuristic, not a calibrated probability. This
+correction persists until another accepted observation or scoped-state reset;
+it is not a time-decaying data assimilation filter.
+
+Parameter history adds the triggering observation ID, actual UTC time, bounded
+initial condition, provenance, old/new snapshots and discrepancy. Accepted and
+held observation results are idempotent; reusing an ID with different WT/village
+is rejected. Returned objects cannot mutate stored evidence. Optional JSON
+persistence is atomic with fsync/replace and contains only model evidence, not
+contacts, tokens or raw report text. Save failures roll back model state/cache;
+invalid state files fail closed. Each state file needs one service/process owner;
+cross-process concurrent writers are not supported.
+
+A6 verification uses temporary scoped files, fixtures, restart/idempotency,
+replay and cross-village isolation, bounds, disagreement holds, rollback,
+parameter-history API and post-assimilation simulation. An isolated memory-only
+real-cache check (no network, no demo-state mutation) changed Talio modelled WT
+38.470->48.470cm and PFVI79.875->80.893 after a synthetic +10cm observation;
+this demonstrates computation, not an actual field observation or validation.

@@ -7,6 +7,11 @@ from __future__ import annotations
 
 import copy
 import math
+import json
+import os
+import re
+import tempfile
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -69,21 +74,76 @@ def _distance_km(lat1, lon1, lat2, lon2):
 
 
 class EngineService:
-    def __init__(self, ingest: Ingest | None = None, *, clock=time.time):
+    def __init__(self, ingest: Ingest | None = None, *, clock=time.time, state_path: str | Path | None = None):
         self.ingest = ingest or Ingest(DiskCache(Path(__file__).resolve().parent.parent / 'runtime/engine/http'), mode='live')
         self.clock = clock
         self.initial_configuration_at = datetime.fromtimestamp(self.clock(), UTC).isoformat().replace('+00:00','Z')
         self.hydraulic = load_params()
         self.pfvi_config = load_pfvi_config()
         self._runs = {}
+        self.state_path = Path(state_path) if state_path is not None else None
+        self._state_lock = threading.RLock()
+        self._village_locks = {v['id']:threading.RLock() for v in list_villages()}
+        self._state = {'schema':1,'villages':{},'observations':{}}
+        if self.state_path is not None and self.state_path.exists():
+            try:
+                loaded = json.loads(self.state_path.read_text(encoding='utf-8'))
+                if loaded['schema'] != 1 or not isinstance(loaded['observations'],dict):
+                    raise ValueError('Invalid state schema')
+                for village_id,record in loaded['villages'].items():
+                    get_village(village_id)
+                    value=record['initial_wt_cm']
+                    if not math.isfinite(value) or not 0 <= value <= 150 or not isinstance(record['version'],int) or record['version'] < 1:
+                        raise ValueError('Invalid state bounds')
+                    if not record['history'] or record['history'][-1]['version'] != record['version']:
+                        raise ValueError('Invalid parameter history')
+                json.dumps(loaded,allow_nan=False)
+                self._state=loaded
+            except (OSError,ValueError,TypeError,KeyError):
+                raise DataUnavailable('Adaptive state unavailable or invalid') from None
+        for village in list_villages():
+            self._ensure_village_state(village['id'])
 
-    def _run(self, village_id, mode, day):
+    def _ensure_village_state(self,village_id):
+        if village_id not in self._state['villages']:
+            self._state['villages'][village_id] = {'initial_wt_cm':40.0,'version':1,'confirmed':False,
+                'history':[{'version':1,'params':{'groundwater':self.hydraulic.__dict__,
+                    'pfvi':self.pfvi_config['params'].__dict__,'initial_wt_cm':40.0,
+                    'provenance':'Initial team-assumption configuration; not field calibration'},
+                    'observation_id':None,'created_at':self.initial_configuration_at}]}
+
+    def _persist(self):
+        if self.state_path is None:
+            return
+        temp=None
+        try:
+            self.state_path.parent.mkdir(parents=True,exist_ok=True)
+            with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=self.state_path.parent,delete=False) as handle:
+                temp=handle.name
+                json.dump(self._state,handle,allow_nan=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp,self.state_path)
+        except OSError:
+            raise DataUnavailable('Adaptive state could not be saved') from None
+        finally:
+            if temp and os.path.exists(temp):
+                os.unlink(temp)
+
+    def _run(self,village_id,mode,day):
+        get_village(village_id)
+        with self._village_locks[village_id]:
+            return self._compute_run(village_id,mode,day)
+
+    def _compute_run(self, village_id, mode, day):
         get_village(village_id)
         if mode not in ('live', 'replay') or not isinstance(day, int) or not 0 <= day < REPLAY_DAYS:
             raise ValueError('Invalid mode/day')
         if mode == 'live' and day != 0:
             raise ValueError('Live mode requires day=0')
-        key = (village_id, mode)
+        state = self._state['villages'][village_id]
+        version = state['version'] if mode == 'live' else 1
+        key = (village_id, mode, version)
         entry = self._runs.get(key)
         if entry and self.clock() - entry[0] < (300 if mode == 'live' else 86400):
             return entry[1]
@@ -96,7 +156,7 @@ class EngineService:
         if not rows or rows[0]['soil_moisture_pct'] is None:
             raise DataUnavailable('Initial mineral-soil moisture proxy unavailable')
         gw = solve_groundwater([r['rain_mm'] for r in rows], [r['et0_mm'] for r in rows],
-                               params=self.hydraulic, initial_wt_cm=40, canal_wt_cm=80)
+                               params=self.hydraulic, initial_wt_cm=state['initial_wt_cm'] if mode=='live' else 40, canal_wt_cm=80)
         config = self.pfvi_config
         initial = diobs(rows[0]['soil_moisture_pct'], config['fc'], config['sat'])
         pfvi = run_pfvi([r['wt_cm'] for r in gw['items']], [r['rain_mm'] for r in rows],
@@ -105,7 +165,7 @@ class EngineService:
         curve = [dict(date=r['date'], wt_cm=g['wt_cm'], pfvi=p['pfvi'], level=p['level'], rain_mm=r['rain_mm'])
                  for r,g,p in zip(rows,gw['items'],pfvi['items'])]
         assumptions = weather['assumptions'] + gw['assumptions'] + ASSUMPTIONS + [
-            'Initial groundwater depth 40cm, canal depth 80cm are unmeasured team assumptions',
+            f"Initial groundwater depth {state['initial_wt_cm'] if mode=='live' else 40}cm; canal depth 80cm is a team assumption",
             'PFVI starts from first-day mineral-soil DIobs; no independent field calibration',
             'Daily states represent modelled end-of-day forcing, including forecast rain; not current field measurements',
             'BMKG village coordinates are reference points, not official boundaries',
@@ -114,7 +174,11 @@ class EngineService:
         ]
         if mode == 'replay':
             assumptions.append('ERA5 historical perfect-forecast replay, not an out-of-sample prediction')
-        result = dict(weather=weather, groundwater=gw, curve=curve, assumptions=assumptions)
+        accepted = mode=='live' and state.get('confirmed',False)
+        if accepted:
+            assumptions.append('Bounded initial-condition assimilation after one confirmed observation; K/Sy not calibrated; confidence0.7 is heuristic, not validated probability')
+        result = dict(weather=weather, groundwater=gw, curve=curve, assumptions=assumptions,
+                      confidence=.7 if accepted else .5)
         self._runs[key] = (self.clock(), result)
         return result
 
@@ -125,7 +189,7 @@ class EngineService:
         weather = run['weather']
         return dict(village_id=village_id, level=point['level'], pfvi=point['pfvi'], wt_cm=point['wt_cm'],
                     days_to_critical=crossing, critical_date=curve[crossing]['date'] if crossing is not None else None,
-                    confidence=.5, data_as_of=weather['data_as_of'], wt_source='modelled',
+                    confidence=run['confidence'], data_as_of=weather['data_as_of'], wt_source='modelled',
                     source='fixture' if weather['source']=='fixture' else 'modelled', stale=weather['stale'],
                     mode=mode, day=day, assumptions=run['assumptions'],
                     reason=None if crossing is not None else 'No critical crossing within 14-day horizon')
@@ -208,10 +272,77 @@ class EngineService:
 
     def params_history(self, village_id: str) -> list[dict]:
         get_village(village_id)
-        return [{'version':1,'params':{'groundwater':self.hydraulic.__dict__,
-                                     'pfvi':self.pfvi_config['params'].__dict__,
-                                     'provenance':'Initial team-assumption configuration; not field calibration'},
-                 'observation_id':None,'created_at':self.initial_configuration_at}]
+        with self._state_lock:
+            return copy.deepcopy(self._state['villages'][village_id]['history'])
+
+    def recalibrate(self, village_id: str, observation: dict, observation_id: str) -> dict:
+        """Bounded WT initial-condition assimilation; never fit K/Sy from one point.
+
+        Caller must supply confirmed=True and a persistent unique observation_id.
+        A pre-update discrepancy >30cm is held without changing parameters.
+        Replay does not mutate adaptive state, history, confidence or idempotency.
+        """
+        get_village(village_id)
+        if not isinstance(observation,dict) or observation.get('confirmed') is not True:
+            raise ValueError('Confirmed observation required')
+        if not isinstance(observation_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',observation_id):
+            raise ValueError('Invalid observation identifier')
+        if observation.get('village_id',village_id) != village_id:
+            raise ValueError('Observation village mismatch')
+        try:
+            measured=float(observation.get('wt_cm'))
+        except (ValueError,TypeError):
+            raise ValueError('Plausible finite WT observation required') from None
+        if isinstance(observation.get('wt_cm'),bool) or not math.isfinite(measured) or not 0 <= measured <= 150:
+            raise ValueError('Plausible finite WT observation required')
+        mode,day=observation.get('mode','live'),observation.get('day',0)
+        if mode not in ('live','replay') or not isinstance(day,int) or not 0 <= day < REPLAY_DAYS or (mode=='live' and day != 0):
+            raise ValueError('Invalid mode/day')
+        with self._state_lock, self._village_locks[village_id]:
+            record=self._state['villages'][village_id]
+            duplicate=self._state['observations'].get(observation_id) if mode=='live' else None
+            if duplicate:
+                if duplicate['village_id'] != village_id or duplicate['observed_wt_cm'] != measured:
+                    raise ValueError('Observation identifier conflict')
+                return copy.deepcopy(duplicate['result'])
+            old=copy.deepcopy(self.village_status(village_id,mode,day))
+            residual=measured-old['wt_cm']
+            result=dict(old=old,new=copy.deepcopy(old),version=record['version'],recalibrated=False,
+                        reason=None,observation_id=observation_id,pre_update_discrepancy_cm=residual,
+                        observed_wt_cm=measured,applied_initial_wt_delta_cm=0.0)
+            if mode=='replay':
+                result['reason']='replay_skips_recalibration'
+                return result
+            prior_state=copy.deepcopy(self._state)
+            prior_runs=self._runs.copy()
+            try:
+                if abs(residual)>30:
+                    result['reason']='discrepancy_requires_verification'
+                else:
+                    adjustment=max(-15.0,min(15.0,residual))
+                    updated=max(0.0,min(150.0,record['initial_wt_cm']+adjustment))
+                    applied=updated-record['initial_wt_cm']
+                    record['initial_wt_cm']=updated
+                    record['version']+=1
+                    record['confirmed']=True
+                    new=copy.deepcopy(self.village_status(village_id,'live',0))
+                    result.update(new=new,version=record['version'],recalibrated=True,
+                                  reason='bounded_initial_condition_assimilation',applied_initial_wt_delta_cm=applied)
+                    record['history'].append({'version':record['version'],
+                        'params':{'groundwater':self.hydraulic.__dict__,'pfvi':self.pfvi_config['params'].__dict__,
+                                  'initial_wt_cm':updated,'provenance':'Bounded initial-condition WT assimilation; not K/Sy calibration'},
+                        'observation_id':observation_id,
+                        'created_at':datetime.fromtimestamp(self.clock(),UTC).isoformat().replace('+00:00','Z'),
+                        'old':old,'new':new,'pre_update_discrepancy_cm':residual,
+                        'observed_wt_cm':measured,'applied_initial_wt_delta_cm':applied})
+                self._state['observations'][observation_id]={'village_id':village_id,'observed_wt_cm':measured,
+                                                           'result':copy.deepcopy(result)}
+                self._persist()
+            except Exception:
+                self._state=prior_state
+                self._runs=prior_runs
+                raise
+            return copy.deepcopy(result)
 
     def backtest(self, village_id: str) -> dict:
         get_village(village_id)
@@ -266,3 +397,7 @@ def params_history(village_id: str):
 
 def backtest(village_id: str):
     return _service().backtest(village_id)
+
+
+def recalibrate(village_id: str, observation: dict, observation_id: str):
+    return _service().recalibrate(village_id,observation,observation_id)

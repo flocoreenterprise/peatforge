@@ -78,3 +78,5 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - C3: real B5 decision approvals/rejections and SMS simulator/progress polling4s; web build PASS, formatter7 assertions PASS; backend full suite96+15subtests PASS. Integrated security: noP0/P1; synchronous live-webhook ack P2 deferred until realSMS.
 - C4: summary-first village detail, modelled PFVI/WT, honest Days Bought, WT/PFVI curves and Replay; strictTS + webbuild PASS; actualcached replay9 gives1day; light/dark CSS corrected.
 - Integration: cloud SMS loop passed through approval + exact1day mock follow-up; fixed external MapLibre worker asset and mjs MIME; fullsuite96+15subtests PASS; compact mobile controls, no duplicate mock banner.
+- Core gate10:50 accepted; pending UI nits for12:15: mobile attribution competes with controls, small chart labels, long assumptions disclosure; no visual polishing now. Eight pending files alreadycommitted484c7e3.
+- A6: bounded per-village initial-WT assimilation, before/after/history and idempotent persistence; engine60 PASS; root ready-block115+15subtests PASS; replay remains unchanged.
