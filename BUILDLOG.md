@@ -64,3 +64,12 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - Root verified actualcached Talio day9: modelled WT/PFVI, canal+60cm scenario delays crossingJune30 toJuly1 (+1day).
   Day8 has a lower-bound benefit, not a fabricated exactdays value. All5 live numeric paths also verified.
 - A5 API is next; no change to external messaging credentials or recipients.
+
+### Engine gate passed, Warden completed
+
+- A5 commit988b74f:52 testsPASS, actual-cache API checks200 with network disabled; bounded validation and finiteJSON.
+- Auditor live/day guard fixed; root caught whole-region hotspot default, now union of5pilot-radius circles plus dedup.
+- B3 commitbe93968:33 backend testsPASS; shared EngineService/API/tools, actual source independent from open auth.
+- Luna found inbound receipt retry could skip failed processing. Fixed durable completion and original context;
+  failed confirmation hooks resume same observation without duplicates. Transient failure is503, not invalid422.
+- B5 underway: persisted proposal/approval/follow-up loop, mock delivery only, no adaptive recalibration.

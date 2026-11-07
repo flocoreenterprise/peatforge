@@ -101,10 +101,12 @@ Example objects referenced below are defined next. Routes marked optional are cu
 | GET /api/backtest | O | village_id | {"available":false,"reason":"FIRMS_MAP_KEY unset","hits":null,"misses":null} (optional) |
 | POST /api/warmup | O | {} | {"ready":true,"villages":5} |
 | POST /api/observations | O | confirmed ObservationInput | {"observation_id":"o1","old":{},"new":{},"version":2,"recalibrated":true} |
+| GET /api/observations | O | village_id? | {"items":[{"id":"o1","village_id":"62.11.01.2002","wt_cm":61,"confirmed":true,"pre_update_model":{},"created_at":"2026-11-07T03:00:00Z"}]} |
 | GET /api/responders | O | village_id? | {"items":[Responder]} |
 | GET /api/responders/{id}/field-link | O | none | {"field_path":"/f/<opaque-token>"} (never log) |
 | GET /api/responders/{id}/messages | O | after? | {"items":[Message]} |
 | POST /api/demo/inbound | O, public_demo only | {"responder_id":"r1","text":"AIR 61 ASAP YA dekat kanal 4","mode":"replay","day":9} | {"items":[Message],"state":"confirm"}; SAME inbound pipeline as SMS, no real send |
+| GET /api/demo/progress | O | responder_id=r1 | {"responder_id":"r1","state":"saved","mode":"replay","day":9,"observation_id":"o1","action_id":"a1","steps":[{"id":"alert","label":"Peringatan","done":true}],"counts":{"messages":7,"observations":1,"actions":1}}; all5 steps emitted from persisted facts |
 | POST /api/responders/{id}/send | O | {"text":"Pesan","channel":"sms"} | {"message_id":"m1","status":"mock"} |
 | POST /api/events/risk-changed | O | {"village_id":"62.11.01.2002","level_to":"TINGGI","mode":"replay","day":5,"hour_override":10} | {"trace_id":"t1","notified":1,"suppressed":0} |
 | GET /api/policy | O | none | {"max_calls_per_day":1,"quiet_hours":[21,5],"timezone":"Asia/Jakarta","default_channel":"sms","l3_requires_approval":true} |
