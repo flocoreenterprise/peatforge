@@ -19,7 +19,8 @@ Changes require orchestrator agreement. Phase 2 has been authorized by the user'
 - Errors: `{"error":{"code":"unavailable","message":"Data belum tersedia"}}` with appropriate 400/401/403/404/409/422/429/503.
 - JSON never contains NaN/Infinity. Unavailable numeric values are null with a reason, not a fabricated zero.
 - Standard list response `{items:[]}`. Geo endpoints return GeoJSON FeatureCollection where stated.
-- `source`: fixture|modelled|measured; `stale`, `data_as_of`, `assumptions` accompany computed results.
+- `source`: fixture|modelled|measured for numerical data; administrative metadata may use provider with provider=BMKG.
+  `stale`, `data_as_of`, `assumptions` accompany computed results.
 - Every live Command view polls at 4 s, field view at 3 s; optional SSE never replaces polling.
 
 ## Engine and scientific decisions
@@ -228,6 +229,11 @@ updates only requested names in .env and prints `tersimpan` on success. Never du
 Provider account readiness and delivery must be tested separately; shape validation does not verify credentials.
 
 ## Acceptance and cut plan
+
+Latest lead gate overrides older optional plans: start09:31, core by12:00, integration12:00-12:30, freeze13:00.
+Build only A3-A5 -> B3+B5/full mocked SMS loop -> C2-C4 now. A6/A7/national/C7/3D/Telegram/B6b/trace drawer/ask bar are CUT.
+Observation submission records evidence; adaptive recalibration is deferred, with no claim of adaptation in UI/pitch.
+Reference visuals only from user-supplied screenshots. Auditor max5min/block; integrated security before tunnel opening.
 
 Must-haves: deterministic groundwater/PFVI, honest Days Bought, full alert -> AIR -> readback -> YA -> proposal -> approve -> follow-up,
 PIN auth, replay. Then B6a. Optional: national/QA, 3D, Realtime, Telegram, backtest, expanded trace/glossary/anonymity.
