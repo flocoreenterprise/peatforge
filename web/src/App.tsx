@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Check, ChevronRight, CircleHelp, Fingerprint, Leaf, LockKeyhole, LogOut, Menu, Moon, Radio, RefreshCw, ShieldCheck, Sun, Trees, Waves, X, Inbox, MapPin, Phone, Workflow } from 'lucide-react';
-import { api, ApiError, mockConfig, type Config, type Village } from './api';
-import MapCanvas from './MapCanvas';
+import { api, ApiError, mockConfig, type Config } from './api';
+import MapCanvas from './map/MapCanvas';
+import { usePilot, dateLabel, replayDate, number, type Mode } from './map/pilot';
 
-type Tab = 'Keputusan' | 'Desa' | 'Telepon-SMS' | 'Jejak';
-const tabs = [{ name: 'Keputusan', icon: Inbox }, { name: 'Desa', icon: MapPin }, { name: 'Telepon-SMS', icon: Phone }, { name: 'Jejak', icon: Workflow }] as const;
+type Tab = 'Keputusan' | 'Desa' | 'Telepon-SMS';
+const tabs = [{ name: 'Keputusan', icon: Inbox }, { name: 'Desa', icon: MapPin }, { name: 'Telepon-SMS', icon: Phone }] as const;
 
 function Brand() { return <div className="brand"><span className="brand-icon"><Waves size={23}/></span><span>peatforge<span className="brand-sub">COMMAND</span></span></div>; }
 
@@ -16,11 +17,19 @@ export default function App() {
   const [error, setError] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<Tab>('Keputusan');
+  const [tab, setTab] = useState<Tab>('Desa');
+  const [mode, setMode] = useState<Mode>('live');
+  const [day, setDay] = useState(9);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectVillage = useCallback((id: string) => { setSelectedId(id); setTab('Desa'); }, []);
   const [drawer, setDrawer] = useState(false);
-  const [villages, setVillages] = useState<Village[]>([]);
+  const pilot = usePilot(phase === 'command' && !preview, mode, day);
+  const { villages, risk, hotspots, meta } = pilot;
+  const selected = villages.find(v => v.id === selectedId) ?? villages[0];
+  const selectedStatus = risk?.features.find(f => f.properties.village_id === selected?.id)?.properties;
+  const selectedDate = replayDate(meta, day);
   const [connection, setConnection] = useState('');
-  const [updated, setUpdated] = useState<string | null>(null);
+
 
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('peatforge-theme', dark ? 'dark' : 'light'); }, [dark]);
   const initialize = useCallback(async () => {
@@ -40,23 +49,11 @@ export default function App() {
   }, []);
   useEffect(() => { void initialize(); }, [initialize]);
   useEffect(() => {
-    const unauthorized = () => { setPhase('login'); setConfig(null); setPreview(false); setVillages([]); setPin(''); setError('Sesi berakhir. Masuk kembali dengan PIN operator.'); };
+    const unauthorized = () => { setPhase('login'); setConfig(null); setPreview(false); setPin(''); setError('Sesi berakhir. Masuk kembali dengan PIN operator.'); };
     window.addEventListener('peatforge:unauthorized', unauthorized);
     return () => window.removeEventListener('peatforge:unauthorized', unauthorized);
   }, []);
-  useEffect(() => {
-    if (phase !== 'command' || preview) return;
-    let active = true;
-    const controller = new AbortController();
-    const poll = async () => {
-      try {
-        const result = await api<{ items: Village[] }>('/villages', { signal: controller.signal });
-        if (active) { setVillages(result.items); setConnection(''); setUpdated(new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date())); }
-      } catch (failure) { if (active && !(failure instanceof ApiError && failure.status === 401)) setConnection('Sambungan terputus · mencoba kembali'); }
-    };
-    void poll(); const timer = window.setInterval(() => void poll(), 4000);
-    return () => { active = false; controller.abort(); clearInterval(timer); };
-  }, [phase, preview]);
+
 
   async function login(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
@@ -66,7 +63,7 @@ export default function App() {
   }
   async function logout() {
     setBusy(true);
-    try { await api('/auth/logout', { method: 'POST' }); setPhase('login'); setConfig(null); setVillages([]); setPreview(false); }
+    try { await api('/auth/logout', { method: 'POST' }); setPhase('login'); setConfig(null); setPreview(false); }
     catch { setConnection('Keluar belum berhasil. Coba lagi.'); }
     finally { setBusy(false); }
   }
@@ -80,25 +77,26 @@ export default function App() {
   return <main className="command-screen">
     <header className="topbar"><Brand/><div className="header-divider"/><span className="workspace-label">Pusat komando</span><div className="topbar-right"><span className="connection-indicator"><i className={connection || preview ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection ? 'Terputus' : 'Terhubung'}</span>{themeButton}{preview ? <button className="text-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={16}/><span>Coba hubungkan</span></button> : <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div></header>
     <section className="command-body">
-      <MapCanvas dark={dark}/>
+      <MapCanvas dark={dark} villages={villages} risk={risk} hotspots={hotspots} selectedId={selected?.id ?? null} onSelect={selectVillage}/>
+      <section className="replay-control glass-panel" aria-label="Waktu pantauan"><div className="mode-switch"><button className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>{mode === 'replay' && <div className="replay-slider"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari replay" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/><span>ERA5 · prakiraan sempurna historis</span></div>}</section>
       <div className="workspace-toolbar"><div className="location-selector"><MapPin size={16}/><span>Wilayah pilot</span></div><span className="live-badge"><Radio size={13}/>{preview ? 'Pratinjau mock' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.mode === 'mock' ? 'Kanal simulasi' : 'LIVE'}</span><button className="drawer-toggle" onClick={() => setDrawer(!drawer)} aria-expanded={drawer} aria-label="Buka panel informasi">{drawer ? <X size={18}/> : <Menu size={18}/>}</button></div>
-      {(preview || config?.mode === 'mock' || connection) && <div className="environment-banner" role="status">{connection || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
+      {(preview || pilot.error || config?.mode === 'mock' || connection) && <div className="environment-banner" role="status">{connection || pilot.error || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
       <aside className="operations-panel glass-panel">
         <div className="panel-topline"><span className="eyebrow">MEJA OPERASI</span><span className="panel-counter">01 / PILOT</span></div>
         <h1>Gambut terpantau.<br/><span>Keputusan di tangan Anda.</span></h1>
         <p className="panel-intro">Pantau kondisi desa, dengarkan laporan warga, lalu tentukan langkah berikutnya.</p>
-        <div className="three-stats"><div><strong>{villages.length || '—'}</strong><span>Desa terhubung</span></div><div><strong>—</strong><span>Perlu keputusan</span></div><div><strong>—</strong><span>Laporan baru</span></div></div>
+        <div className="three-stats"><div><strong>{villages.length || '—'}</strong><span>Desa terhubung</span></div><div><strong>{risk ? risk.features.filter(f => ['TINGGI', 'EKSTREM'].includes(f.properties.level)).length : '—'}</strong><span>Risiko tinggi+</span></div><div><strong>{hotspots && hotspots.available !== false ? hotspots.items.length : '—'}</strong><span>Titik panas 72j</span></div></div>
         <nav className="panel-tabs" aria-label="Panel operasi">{tabs.map(({ name, icon: Icon }) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={16}/><span>{name}</span></button>)}</nav>
         <div className="panel-content">
           {tab === 'Keputusan' && <><div className="section-heading"><h2>Kotak keputusan</h2><span>Persetujuan manusia</span></div><div className="empty-state"><div className="empty-icon"><ShieldCheck size={27}/></div><h3>Siap menerima usulan</h3><p>Usulan tindakan dan laporan yang perlu diperiksa akan muncul di sini setelah terhubung.</p><span className="waiting-label"><span/>MENUNGGU DATA OPERASIONAL</span></div><div className="approval-note"><LockKeyhole size={15}/><p>Setiap tindakan lapangan memerlukan persetujuan operator.</p></div></>}
-          {tab === 'Desa' && <><div className="section-heading"><h2>Wilayah pantauan</h2><span>{villages.length ? `${villages.length} desa` : 'Belum tersedia'}</span></div>{villages.length ? <div className="village-list">{villages.map(village => <div className="village-row" key={village.id}><span className="village-icon"><Trees size={18}/></span><div><strong>{village.name}</strong><span>{village.source === 'fixture' ? 'Lokasi contoh · belum terverifikasi' : village.code}</span></div><ChevronRight size={16}/></div>)}</div> : <Empty icon="village" title="Menunggu data desa" text="Lokasi dan kondisi desa tersedia setelah layanan terhubung."/>}</>}
+          {tab === 'Desa' && <><div className="section-heading"><h2>Wilayah pantauan</h2><span>{pilot.loading ? 'Memuat risiko…' : `${villages.length} desa`}</span></div>{villages.length ? <div className="village-list">{villages.map(village => { const status = risk?.features.find(f => f.properties.village_id === village.id)?.properties; return <button className={`village-row ${village.id === selected?.id ? 'selected' : ''}`} key={village.id} onClick={() => selectVillage(village.id)}><span className="village-icon"><Trees size={18}/></span><div><strong>{village.name}</strong><span>{status ? <><i className={`status-dot ${status.level.toLowerCase()}`}/>{status.level} · {status.stale ? 'cache lama' : status.source === 'fixture' ? 'contoh' : 'model'}</> : 'Risiko belum tersedia'}</span></div><ChevronRight size={16}/></button>; })}</div> : <Empty icon="village" title="Menunggu data desa" text="Lokasi dan kondisi desa tersedia setelah layanan terhubung."/>}{selected && <section className="selected-village"><span className="eyebrow">DESA TERPILIH</span><h3>{selected.name}</h3><p>{selectedStatus ? `${selected.name} berada pada tingkat ${selectedStatus.level.toLowerCase()}. ${selectedStatus.days_to_critical == null ? 'Tidak ada perlintasan batas kritis dalam horizon model.' : selectedStatus.days_to_critical === 0 ? 'Batas kritis model sudah tercapai.' : `Batas kritis model diperkirakan dalam ${number(selectedStatus.days_to_critical)} hari.`}` : 'Risiko belum tersedia. Kondisi belum dapat disimpulkan.'}</p><div className="village-numbers"><span>Indeks rawan api<strong>{number(selectedStatus?.pfvi)}<small> / 300</small></strong></span><span>Air tanah model<strong>{number(selectedStatus?.wt_cm)}<small> cm</small></strong></span></div><p className="source-line">Air tanah: perkiraan model, belum diukur.</p><p className="source-line">Lokasi: {selected.source === 'provider' ? 'BMKG' : selected.source} · titik referensi, bukan batas desa.</p><p className="source-line">Risiko: {selectedStatus?.source ?? 'belum tersedia'}{selectedStatus?.stale ? ' · cache lama' : ''} · data per {dateLabel(selectedStatus?.data_as_of)}</p></section>}</>}
           {tab === 'Telepon-SMS' && <><div className="section-heading"><h2>Kabar dari lapangan</h2><span>SMS & telepon</span></div><Empty icon="phone" title="Dekat dengan warga" text="Percakapan dan laporan responder akan tersedia di panel ini."/><div className="approval-note"><Radio size={15}/><p>Responder menggunakan SMS, telepon, atau link web. Tanpa memasang aplikasi.</p></div></>}
-          {tab === 'Jejak' && <><div className="section-heading"><h2>Jejak keputusan</h2><span>Dapat ditelusuri</span></div><Empty icon="trace" title="Setiap langkah tercatat" text="Alasan, pemeriksaan, dan persetujuan agen akan tampil sebagai jejak aktivitas."/></>}
+
         </div>
-        <div className="panel-footer"><span><i/>{updated ? `Diperbarui ${updated} WIB` : 'Belum ada pembaruan'}</span><span>Polling 4 dtk</span></div>
+        <div className="panel-footer"><span><i/>{pilot.synced ? `Sinkron ${pilot.synced} WIB` : 'Belum ada pembaruan'}</span><span>Polling 4 dtk</span></div>
       </aside>
-      <aside className={`context-panel glass-panel ${drawer ? 'drawer-open' : ''}`}><div className="context-heading"><span className="eyebrow">CARA MEMBACA PETA</span><Leaf size={18}/></div><h2>Kenali risikonya.<br/>Periksa buktinya.</h2><p>Warna risiko menunjukkan indeks rawan api. Data yang belum tersedia tidak berarti kondisi rendah risiko.</p><div className="risk-legend">{['Rendah', 'Sedang', 'Tinggi', 'Ekstrem'].map((level, i) => <div key={level}><i className={`risk-${i}`}/><span>{level}</span></div>)}</div><div className="model-note"><CircleHelp size={16}/><p>Air tanah: <strong>perkiraan model, belum diukur.</strong> Titik panas adalah deteksi satelit, bukan api terkonfirmasi.</p></div><div className="context-bottom"><Check size={14}/><span>Manusia memegang keputusan akhir</span></div></aside>
-      <div className="map-bottom-note"><span>WILAYAH PILOT</span><span>Batas desa belum ditampilkan</span></div>
+      <aside className={`context-panel glass-panel ${drawer ? 'drawer-open' : ''}`}><div className="context-heading"><span className="eyebrow">CARA MEMBACA PETA</span><Leaf size={18}/></div><h2>Kenali risikonya.<br/>Periksa buktinya.</h2><p>Warna risiko menunjukkan indeks rawan api. Data yang belum tersedia tidak berarti kondisi rendah risiko.</p><div className="risk-legend">{['Rendah', 'Sedang', 'Tinggi', 'Ekstrem'].map((level, i) => <div key={level}><i className={`risk-${i}`}/><span>{level}</span></div>)}</div><div className="model-note"><CircleHelp size={16}/><p>Air tanah: <strong>perkiraan model, belum diukur.</strong> Titik panas adalah deteksi satelit, bukan api terkonfirmasi.</p></div><div className="hotspot-note"><strong>Titik panas · radius 5 km dari desa pilot</strong><p>{hotspots?.available === false ? mode === 'replay' ? 'Arsip titik panas tidak tersedia. Data live tidak diputar ulang.' : 'Data titik panas belum tersedia.' : hotspots ? `${number(hotspots.items.length)} deteksi dalam 72 jam · ${hotspots.source ?? 'NOAA-20/21'}${hotspots.stale ? ' · cache lama' : ''}` : 'Memuat deteksi satelit…'}</p><span>Data per {dateLabel(hotspots?.data_as_of)}</span><p>Oranye: &lt;24 jam · pudar: 24–72 jam.</p></div><div className="context-bottom"><Check size={14}/><span>Manusia memegang keputusan akhir</span></div></aside>
+      <div className="map-bottom-note"><span>WILAYAH PILOT</span><span>Titik desa BMKG · tanpa batas atau geometri kanal</span></div>
     </section>
   </main>;
 }
