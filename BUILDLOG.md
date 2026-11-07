@@ -130,3 +130,5 @@ In progress: final A7 commit/push and frontend handoff; no new features.
 Blocked: real phone GPT requires Twilio Full account; no peat/vegetation national mask or industrial OSM cache.
 Next: user completes billing upgrade; verify account and await explicit authorization before any further call.
 Cut: invented land cover, rainy-season claim without evidence, OSM retries, September replay, anywhere/volunteers/offline/status page.
+
+- 15:35 public-demo block: DEMO_PUBLIC=1 forces isolated mock channels and blocks live delivery/callbacks; UI Simulated labels and one-click example response; validating full pipeline and build.

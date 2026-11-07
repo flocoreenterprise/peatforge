@@ -1,4 +1,4 @@
-export type Config = { mode: string; public_demo?: boolean; public_reporting_enabled?: boolean; public_report_url?: string; source?: string; outbound?: string; voice_mode?: string; poll_ms: number; field_poll_ms: number; voice_available: boolean; browser_voice_supported?: boolean };
+export type Config = { mode: string; public_demo?: boolean; demo_public?: boolean; public_reporting_enabled?: boolean; public_report_url?: string; source?: string; outbound?: string; voice_mode?: string; poll_ms: number; field_poll_ms: number; voice_available: boolean; browser_voice_supported?: boolean };
 export type Village = { id: string; name: string; code: string; lat: number; lon: number; source: string };
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }

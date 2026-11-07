@@ -141,3 +141,7 @@ Hard rules:
 - User authorized one more attended Realtime phone call after plain stream URL/custom Parameter and audible fallback repair; finish this UAT before A7 work. No further calls without explicit request.
 - Then reimplement A7 from scratch in engine/, classified events/API and minimal web labels/badges only; no layout changes. This explicitly reopens the requested web labels despite earlier freeze. New block must be green by15:00 then freeze. Never open rehearsal. Sol builders, Luna five-minute audit, tests, commit and push; CONTRACT exact examples required.
 - Fire classifications are model/rule-based candidates, not confirmed fires. Unavailable vegetation/peat/OSM evidence stays uncertain; never invent land cover or seasonal evidence.
+
+## Public shipping override — 15:32 WIB
+- Ship by16:05, submission16:30. Root implements three green commits and pushes each: DEMO_PUBLIC=1 simulation isolation; browser Realtime120s/20sessions per hour; public dashboard deployment and clean-browser QA.
+- No real Twilio/SMS, no secret or .env changes. Existing keys are read at runtime only. Public mode must never open the protected database.

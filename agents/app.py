@@ -145,12 +145,13 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
                data_source: str | None = None, web_dist: Path | None = None,
                background_scout: bool | None = None) -> FastAPI:
-    public_demo = public_demo_setting(os.environ.get('PUBLIC_DEMO')) if public_demo is None else public_demo
+    demo_public = os.environ.get('DEMO_PUBLIC','').strip() == '1'
+    public_demo = True if demo_public else public_demo_setting(os.environ.get('PUBLIC_DEMO')) if public_demo is None else public_demo
     source = data_source or os.environ.get('PEATFORGE_DATA_SOURCE', '').strip() or 'live'
     if source not in ('live', 'fixture'):
         raise ValueError('PEATFORGE_DATA_SOURCE must be live or fixture')
-    default_path = RUNTIME_DIR / ('demo.sqlite3' if public_demo else 'state.sqlite3')
-    configured_path = os.environ.get('PEATFORGE_DB_PATH', '').strip()
+    default_path = RUNTIME_DIR / ('public-demo.sqlite3' if demo_public else 'demo.sqlite3' if public_demo else 'state.sqlite3')
+    configured_path = '' if demo_public else os.environ.get('PEATFORGE_DB_PATH', '').strip()
     path = Path(db_path if db_path is not None else configured_path or default_path).resolve()
     forbidden_path = (RUNTIME_DIR / ('state.sqlite3' if public_demo else 'demo.sqlite3')).resolve()
     if path == forbidden_path:
@@ -220,12 +221,20 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                     await task
 
     app = FastAPI(title='Peatforge', lifespan=lifespan)
+    app.state.demo_public = demo_public
+    @app.middleware('http')
+    async def forbid_live_delivery(request: Request, call_next):
+        path=request.url.path
+        if demo_public and (path.startswith('/api/voice/twilio/') or path.startswith('/api/channels/') or
+                            path.startswith('/api/responders/') and path.endswith('/send')):
+            return JSONResponse({'error':{'code':'forbidden','message':'Simulated demo: pengiriman nyata dinonaktifkan'}},status_code=403)
+        return await call_next(request)
     app.add_middleware(SecurityHeaders)
     app.state.auth=OperatorAuth(AuthSettings.from_environment(),public_demo)
     app.state.public_demo = public_demo
     app.state.database_path = path
     app.state.engine=engine
-    app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
+    app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo, demo_public=demo_public,
                             source=source, engine='deterministic', outbound='mock',
                             poll_ms=4000, field_poll_ms=3000, voice_available=False,scout_background=background_enabled)
     app.state.config['browser_voice_supported']=True
@@ -503,6 +512,9 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
 
     @app.websocket('/api/voice/stream')
     async def phone_stream(socket:WebSocket):
+        if demo_public:
+            await socket.close(code=1008)
+            return
         await app.state.phone_realtime.handle(socket)
 
     @app.post('/api/channels/sms/inbound')
