@@ -77,3 +77,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - C2: five real BMKG pilot markers, modelled risk and filtered hotspots, Live/Replay polling4s; web build PASS; root full suite96 +15subtests PASS; actual API smoke PASS.
 - C3: real B5 decision approvals/rejections and SMS simulator/progress polling4s; web build PASS, formatter7 assertions PASS; backend full suite96+15subtests PASS. Integrated security: noP0/P1; synchronous live-webhook ack P2 deferred until realSMS.
 - C4: summary-first village detail, modelled PFVI/WT, honest Days Bought, WT/PFVI curves and Replay; strictTS + webbuild PASS; actualcached replay9 gives1day; light/dark CSS corrected.
+- Integration: cloud SMS loop passed through approval + exact1day mock follow-up; fixed external MapLibre worker asset and mjs MIME; fullsuite96+15subtests PASS; compact mobile controls, no duplicate mock banner.

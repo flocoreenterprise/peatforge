@@ -165,11 +165,13 @@ class PlannerTests(unittest.TestCase):
         (dist/'assets').mkdir(parents=True)
         (dist/'index.html').write_text('<html>demo</html>',encoding='utf-8')
         (dist/'assets'/'app.js').write_text('export {}',encoding='utf-8')
+        (dist/'assets'/'worker.mjs').write_text('export {}',encoding='utf-8')
         app=create_app(db_path=Path(self.temp.name)/'static.sqlite3',public_demo=True,engine=self.engine,web_dist=dist)
         with TestClient(app) as client:
             self.assertEqual(client.get('/').status_code,200)
             self.assertEqual(client.get('/village/example').text,'<html>demo</html>')
             self.assertIn('application/javascript',client.get('/assets/app.js').headers['content-type'])
+            self.assertIn('application/javascript',client.get('/assets/worker.mjs').headers['content-type'])
             for path in ('/api/missing','/.env','/AGENTS.md','/engine/service.py','/%2e%2e/AGENTS.md','/assets/missing.js'):
                 self.assertEqual(client.get(path).status_code,404,path)
 

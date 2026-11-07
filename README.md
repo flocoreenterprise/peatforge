@@ -1,32 +1,54 @@
 # Peatforge
 
-Autonomous fire command prototype for Indonesian peatlands. Built from scratch on 7 November 2026.
+Indonesian peatland command prototype built from scratch on 7 November 2026.
+Five BMKG pilot village reference points, cached public environmental inputs, deterministic groundwater/PFVI,
+Days Bought simulation, Replay 2019, and a complete human-approved SMS workflow with mocked delivery.
 
-Build in progress: numerical engine, cached public data, channel foundation and responsive web shell are implemented.
-The integrated SMS decision loop is still being built. See BUILDLOG.md and FEATURE_PARITY.md for actual evidence.
-Read `AGENTS.md` and `CONTRACT.md` before implementation.
-
-- `engine/` — groundwater, PFVI, intervention simulation and replay (Lead).
-- `agents/` — tools, SMS/voice, Warden/Scout/Planner/Verifier and auth (CS #1).
-- `web/` — operator Command and responder pages (CS #2).
-- `scripts/set-secrets.ps1` — interactive masked entry; no secrets in chat or Git.
-
-From PowerShell:
+## Run
 
 ```powershell
 Set-Location C:\Users\fadli\Desktop\peatforge
-powershell -ExecutionPolicy Bypass -File .\scripts\set-secrets.ps1
+& .\scripts\start.ps1 -Install -Build
 ```
 
-Select just the initial auth fields with `-Name DEMO_PIN,SESSION_SECRET` when invoking
-the script directly in PowerShell (`& .\scripts\set-secrets.ps1 -Name DEMO_PIN,SESSION_SECRET`).
-Blank input preserves the current setting. Enter `!clear` to remove a setting.
-Provider credentials may remain empty. The operator opens without PIN per the user's instruction;
-public environmental data are independent from authentication, while external messaging remains mocked.
-No current credential is displayed. See CONTRACT.md for validation and required groups.
+Open http://127.0.0.1:8000. In a second terminal, `& .\scripts\start-tunnel.ps1` prints a temporary HTTPS URL.
+The same FastAPI server serves the React build and API. Keep server/tunnel running during the demo.
+No credentials are required for the current open operator demo. Do not run the secrets script just to start it.
+If credentials are needed later, use only `scripts/set-secrets.ps1`; never paste secrets into chat or Git.
+Protected mode currently fails closed; PIN login and real SMS/phone setup are deferred by user instruction.
 
-The historical documents are planning inputs, not evidence that this fresh build passed any tests.
-The new implementation will record tests, manual cloud QA and risks per task.
+## Demo
 
-Agent file format checked against the official documentation:
-https://learn.chatgpt.com/docs/agent-configuration/subagents
+1. Select Talio, Replay 2019, day9 (24 June). Village detail shows actual cached weather model output.
+2. Open Telepon-SMS. Trigger the model alert; send `AIR 61 ASAP YA dekat kanal 4`.
+3. Read Warden's readback, then press standalone YA. Embedded ASAP YA does not confirm the report.
+4. Open Keputusan. Inspect the proposal, press Setujui then Konfirmasi.
+5. Return to SMS: five persisted progress steps and the conditional follow-up appear. Approval is not field execution.
+6. Generate another report to demonstrate rejection. Every Command panel polls every4seconds.
+
+The current Talio day9 scenario returns1day from the engine. This is a reproducible example, not a promised
+fire-prevention outcome. Other dates legitimately return zero, unavailable exact days or a lower bound.
+
+## Boundaries
+
+- WT/PFVI/benefits are modelled, not sensor measurements or validated fire probabilities.
+- Replay uses known historical ERA5 weather as a perfect forecast; it is not out-of-sample validation.
+- BMKG points are reference coordinates, not official boundaries. Canals/resources/responders are labelled fixtures.
+- NASA hotspots are satellite heat detections, not confirmed fires. Unavailable archive hotspots remain unavailable.
+- Open demo storage is isolated from real contacts; every external delivery is mocked. No real SMS/call was sent.
+- A6 adaptation, A7 hotspot QA, national view,3D,Telegram,Realtime,trace drawer and ask bar are cut.
+- Before real SMS activation, offload synchronous webhook processing to preserve prompt acknowledgements.
+
+## Validation
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest engine/tests agents --ignore=agents/.venv -q
+Set-Location web
+npm.cmd run build
+node src/inbox/benefit.test.mjs
+```
+
+Latest root suite:96passed +15subtests, webbuild PASS, formatter7assertions PASS.
+Manual cloud test passed the complete mocked SMS loop including1day proposal and one follow-up.
+Security found noP0/P1 within public-demo scope. Scheduled audits and final screenshots remain separate checks.
+Read AGENTS.md and CONTRACT.md before edits; contract includes planned routes, while OpenAPI lists implemented routes.

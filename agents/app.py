@@ -247,7 +247,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
 
     dist = (web_dist if web_dist is not None else Path(__file__).resolve().parent.parent / 'web' / 'dist').resolve()
-    mime = {'.js': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
+    mime = {'.js': 'application/javascript', '.mjs': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
             '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon',
             '.woff': 'font/woff', '.woff2': 'font/woff2', '.webp': 'image/webp', '.html': 'text/html'}
 
