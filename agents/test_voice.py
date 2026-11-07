@@ -46,7 +46,7 @@ class VoiceTests(unittest.TestCase):
         self.requests=[]
         self.sms=[]
         self.provider_sid='CA'+'c'*32
-        self.voice.transport=httpx.MockTransport(lambda request:self.requests.append(request) or httpx.Response(201,json={'sid':self.provider_sid}))
+        self.voice.transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'type':'Full'}) if request.method=='GET' else self.requests.append(request) or httpx.Response(201,json={'sid':self.provider_sid}))
         self.app.state.channels.gateway.transport=httpx.MockTransport(lambda request:self.sms.append(request) or httpx.Response(202,json={'id':'fake-sms'}))
         self.client.post('/api/auth/login',json={'pin':'123456'})
 
@@ -365,6 +365,20 @@ class VoiceTests(unittest.TestCase):
             saved=[json.loads(row['value']) for row in connection.execute("SELECT value FROM kv WHERE key LIKE 'voice-session:%'")]
         self.assertEqual(saved[0]['error_code'],21215)
         self.assertTrue('private provider details' not in json.dumps(saved))
+
+
+    def test_trial_or_unknown_realtime_capability_never_reserves_or_calls(self):
+        before=self.app.state.database.get('call-policy:r1')
+        for status,payload,reason in ((200,{'type':'Trial'},'twilio_trial_media_streams_unavailable'),
+                                      (401,{},'twilio_account_capability_unavailable'),
+                                      (200,{'type':'unexpected'},'twilio_account_capability_unavailable')):
+            requests=[]
+            self.voice.transport=httpx.MockTransport(lambda request: requests.append(request) or httpx.Response(status,json=payload))
+            with patch.dict('os.environ',{'VOICE_ENGINE':'realtime','OPENAI_API_KEY':'sk-offline-test'}):
+                result=self.call()
+            self.assertEqual(result,{'call_id':None,'status':'suppressed','reason':reason})
+            self.assertEqual([r.method for r in requests],['GET'])
+            self.assertEqual(self.app.state.database.get('call-policy:r1'),before)
 
 
 if __name__=='__main__':

@@ -206,6 +206,28 @@ class VoiceService:
         mode,day=state.get('mode','live'),state.get('day',0)
         return self.tools.get_village_status(row['village_id'],mode,day),state
 
+    def realtime_account_block(self):
+        """Read-only capability check before reserving budget or creating a call.
+
+        Twilio's current trial strips Stream; successful call creation is not
+        evidence that Media Streams is available. Never disclose provider data.
+        """
+        try:
+            with httpx.Client(transport=self.transport,timeout=8,trust_env=False,
+                              follow_redirects=False,
+                              auth=(self.settings.account_sid,self.settings.auth_token)) as client:
+                response=client.get('https://api.twilio.com/2010-04-01/Accounts/'+self.settings.account_sid+'.json')
+                if response.status_code!=200:
+                    return 'twilio_account_capability_unavailable'
+                account_type=response.json().get('type')
+                if account_type=='Trial':
+                    return 'twilio_trial_media_streams_unavailable'
+                if account_type!='Full':
+                    return 'twilio_account_capability_unavailable'
+        except Exception:
+            return 'twilio_account_capability_unavailable'
+        return None
+
     def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False,cli_retry_rejected=False,server_limit_only=False,cli_stream_repair=False):
         if cli_stream_repair and (not cli_realtime_uat or not server_limit_only or cli_retry_rejected or cli_uat_pair or diagnostic):
             raise ChannelUnavailable('Choose the dedicated attended stream repair flow')
@@ -234,6 +256,11 @@ class VoiceService:
         if (diagnostic or uat) and mock:
             # Diagnostic risk bypass is reserved for the actual chosen consenting UAT contact.
             raise ChannelUnavailable('Diagnostic requires the chosen protected test recipient')
+        if (not mock and not diagnostic and os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime')
+                and os.environ.get('OPENAI_API_KEY','').strip()):
+            blocked=self.realtime_account_block()
+            if blocked:
+                return {'call_id':None,'status':'suppressed','reason':blocked}
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
         if cli_realtime_uat and not mock:
             from .uat_realtime import reserve_realtime_uat
