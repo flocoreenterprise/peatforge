@@ -59,3 +59,38 @@ it must never be described as downloaded ERA5 history.
 
 Offline verification: `python -m unittest discover -s engine/tests -v`.
 Tests inject provider bodies/failures and isolate disk caches in temporary folders.
+
+A2 groundwater:
+
+```python
+from engine.groundwater import load_params, solve_groundwater
+result = solve_groundwater([0, 10], [4, 4], params=load_params(),
+                           initial_wt_cm=40, canal_wt_cm=80)
+```
+
+Each returned point is the state AFTER its daily forcing. Hydraulic profiles
+are metres above the effective impermeable datum. `wt_cm` is centimetres below
+peat surface, positive down. `canal_wt_cm` accepts a scalar or daily depths.
+`initial_profile_m` enables continuity between runs. No missing forcing is
+silently converted to zero.
+
+The N=51 conservative interior-node scheme uses automatic explicit substeps and
+asserts the conductivity-weighted stability ratio is <=0.90. Positive rain raises
+water table; ET0 lowers it. Heights are clipped at surface and datum with runoff
+and unmet-demand volumes explicitly accounted for. Mass balance is per metre
+of strip width (m2) over 49 interior control volumes (392m at L400); the two
+boundary nodes are external reservoirs. Daily and cumulative residuals are
+reported. This ledger is a numerical conservation check, not model validation.
+
+The 24m effective hydraulic thickness is a TEAM ASSUMPTION used to set diffusion
+speed, not a measured peat thickness. The synthetic 30-day, no-forcing benchmark
+at K=5m/day, Sy=0.20, L=400m starts flat at 60cm depth; raising canal boundary by
+60cm yields 0.346m mid-strip rise. This tunes toward the ~0.35m target in A2;
+the planning note's Sebangau 0.38m literature benchmark has not been independently
+verified and is not independent validation. YAML source strings carry doc04
+literature-snippet caveats and identify unverified team values.
+
+If the explicit solver exceeds its substep budget, the entire run restarts
+from the original profile using a labelled lumped bucket approximation, with
+the same output shape and a `fallback_reason`. Invalid inputs always raise.
+Callers can require the resolved solver using `allow_fallback=False`.

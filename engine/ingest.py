@@ -222,4 +222,3 @@ class Ingest:
         result = self._hotspot_urls(urls)
         result['assumptions'].append('Archive sensor availability must be verified; no fabricated 2019 NOAA-21 coverage')
         return result
-

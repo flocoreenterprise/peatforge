@@ -1,0 +1,22 @@
+groundwater:
+  conductivity_m_day:
+    value: 5.0
+    source: 'Team-selected K=5 m/day within Kurnianto et al. 2019 West Kalimantan range quoted in planning doc04 (snippet only, not independently checked); not locally calibrated'
+  specific_yield:
+    value: 0.20
+    source: 'Team assumption per planning doc04; no verified specific-yield measurement'
+  spacing_m:
+    value: 400.0
+    source: 'Team-selected 400 m spacing from Suryadi Sebangau modelling range quoted in planning doc04 (snippet only); fixture canals are not surveyed'
+  effective_thickness_m:
+    value: 24.0
+    source: 'Team assumption tuned toward 0.35 m mid-strip rise in 30 days for a 0.60 m boundary rise at L=400 m; not actual peat thickness; Sebangau 0.38 m benchmark quoted in planning notes is unverified here'
+  et_multiplier:
+    value: 1.0
+    source: 'Team assumption: actual evapotranspiration equals reference ET0 before clipping unmet demand'
+  nodes:
+    value: 51
+    source: 'A2 numerical discretization requirement'
+  stability_safety:
+    value: 0.90
+    source: 'Team numerical safety margin below explicit monotonicity limit'
