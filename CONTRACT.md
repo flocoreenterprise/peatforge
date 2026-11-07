@@ -423,3 +423,5 @@ Anonymous reporting starts with POST /api/public/sessions {"village_id":"<pilot-
 - POST /api/public/voice/transcript {"session_id":"bv_<id>","event_id":"event1","role":"user","text":"parit kering"} ->200 pipeline receipt; role user|assistant; text max500chars. Own messages are visible through GET /api/public/messages.
 - POST /api/public/voice/tool {"session_id":"bv_<id>","call_id":"tool1","name":"get_village_status","arguments":{}} ->200 scoped tool result, same schema as /api/voice/tool. Allowed tools remain get_village_status,record_report,confirm_report,end_call.
 - POST /api/public/voice/end {"session_id":"bv_<id>"} ->200 {"ended":true}. Cross-reporter sessions403; missing/invalid Bearer401. Real Twilio/SMS routes remain403 on public8001.
+
+Protected attended runtime only: DEMO_NO_CALL_LIMITS=1 plus DEMO_NO_CALL_LIMITS_DATE=YYYY-MM-DD (current WIB date) bypass daily/quiet/cooldown attempt caps; expired/missing date preserves defaults. PIN, chosen consenting UAT recipient, provider eligibility and public403 stay enforced. Does not trigger calls automatically.

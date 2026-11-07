@@ -146,3 +146,5 @@ Cut: new features, visual polish, real phone/SMS tests.
 - Attended extra call requested during deployment: exactly one authenticated POST through protected8000 returned HTTP200, status suppressed, reason daily_call_limit. No provider POST, new Call SID or Twilio error code. Config/secrets/counters unchanged; no retry. Existing daily gate therefore still blocks the requested stage call until an explicitly implemented allowance is available.
 
 16:20 QR voice: original UI preserved; consented one-button public WebRTC, scoped server handshake,600s/200hour caps, mobile containment;13 focused voice tests passed, broader78 passed before fixture-key correction.
+
+16:23 Protected attended demo: dated no-call-limit override, PIN and public403 intact;3 focused checks pass. One confirmation call dispatched. Fixed stale voice-hangup failure only when no provider calls remain.

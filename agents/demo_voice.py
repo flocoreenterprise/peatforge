@@ -22,6 +22,8 @@ class DemoVoice(BrowserVoice):
         self.closed=False
         # Restart never forgets an unfinished provider call or resets the budget.
         self.active=self.db.get('demo-voice-calls',{})
+        if not self.active:
+            self.db.set('demo-voice-hangup-failed',False)
         for sid in list(self.active):
             self._terminate(sid)
 
@@ -111,7 +113,7 @@ class DemoVoice(BrowserVoice):
                 self.active.pop(sid,None)
             self.db.set('demo-voice-calls',self.active)
             if not success or not self.active:
-                self.db.set('demo-voice-hangup-failed',not success)
+                self.db.set('demo-voice-hangup-failed',bool(not success and self.active))
             if not success and not self.closed:
                 timer=self.timer_factory(5,lambda:self._terminate(sid))
                 timer.daemon=True

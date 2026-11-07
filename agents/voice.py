@@ -262,7 +262,14 @@ class VoiceService:
             if blocked:
                 return {'call_id':None,'status':'suppressed','reason':blocked}
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
-        if cli_realtime_uat and not mock:
+        no_limits=(not mock and os.environ.get('DEMO_NO_CALL_LIMITS')=='1'
+                   and os.environ.get('DEMO_NO_CALL_LIMITS_DATE')==now.astimezone(WIB).date().isoformat())
+        if no_limits:
+            # Explicit attended demo override expires at WIB midnight. Consent,
+            # chosen recipient, authentication and public delivery gates still apply.
+            allowed,reason=decision('voice',policy_status.level,now,hour_override=12,
+                                    risk_override=bool(diagnostic or uat))
+        elif cli_realtime_uat and not mock:
             from .uat_realtime import reserve_realtime_uat
             allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now,retry_rejected=cli_retry_rejected,stream_repair=cli_stream_repair)
         else:

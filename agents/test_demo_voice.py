@@ -102,3 +102,9 @@ class DemoVoiceTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/voice/session',json={'responder_id':'r1'}).status_code,503)
         result=self.client.post('/api/voice/simulate',json={'responder_id':'r1','event_id':'fallback','text':'halo'})
         self.assertEqual(result.status_code,200)
+
+    def test_restart_clears_stale_failure_only_without_provider_calls(self):
+        self.service.db.set('demo-voice-hangup-failed',True)
+        another=DemoVoice(self.service.db,self.service.tools,self.service.channels,self.service.coordinator,self.service.settings,clock=lambda:self.now,timer_factory=Timer)
+        self.assertFalse(self.service.db.get('demo-voice-hangup-failed'))
+        another.close()
