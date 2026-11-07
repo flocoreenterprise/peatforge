@@ -1,0 +1,68 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, type Config } from '../api';
+import './inbox.css';
+
+export type InboxProps = { villageId?: string; mode: 'live' | 'replay'; day: number };
+type Action = { id: string; village_id: string; title: string; reason: string; kind: string; status: string; mode: string; day: number; responder_id: string; anonymous: boolean; days_bought: number | null; at_least_days: number | null; simulation_reason?: string; benefit: { wt_gain_cm: number | null; pfvi_reduction: number | null }; verifier: { decision: string; checks: { name: string; passed: boolean | null; reason?: string }[] }; assumptions?: string[] };
+type Responder = { id: string; name: string; village_id: string };
+type Message = { id: string; direction: string; body: string; status: string; channel: string; created_at: string };
+type Progress = { state: string; mode: string; day: number; steps: { id: string; label: string; done: boolean }[] };
+const errorText = (error: unknown) => error instanceof Error ? error.message : 'Data belum tersedia';
+export function benefitText(action: Action): string {
+  if (action.days_bought !== null && action.days_bought > 0) return `+${action.days_bought} hari menuju ambang kritis model`;
+  if (action.at_least_days !== null && action.at_least_days > 0) return `Setidaknya +${action.at_least_days} hari; melewati horizon model`;
+  if (action.days_bought === 0) return action.simulation_reason === 'baseline_already_critical' ? 'Ambang kritis sudah tercapai; tambahan hari tidak diklaim' : 'Tidak ada penundaan ambang kritis model; tambahan hari tidak diklaim';
+  const parts = [action.benefit.wt_gain_cm !== null ? `Air lebih dangkal ${action.benefit.wt_gain_cm} cm` : '', action.benefit.pfvi_reduction !== null ? `PFVI turun ${action.benefit.pfvi_reduction}` : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') + ' · tambahan hari belum tersedia' : 'Tambahan hari belum tersedia';
+}
+export default function DecisionInbox({ villageId, mode, day }: InboxProps) {
+  const context = useRef(''); context.current = villageId ?? '';
+  const [items, setItems] = useState<Action[]>([]), [hidden, setHidden] = useState(0), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
+  const [confirm, setConfirm] = useState<{ id: string; operation: 'approve' | 'reject' } | null>(null), [reason, setReason] = useState(''), [busy, setBusy] = useState(false);
+  const refresh = useCallback(async () => {
+    const requestedVillage = villageId ?? '';
+    try { const result = await api<{ items: Action[]; hidden_count: number }>(`/actions${villageId ? `?village_id=${encodeURIComponent(villageId)}` : ''}`); if (context.current !== requestedVillage) return; setItems(result.items); setHidden(result.hidden_count); setError(''); setLoaded(true); } catch (e) { setError(errorText(e)); }
+  }, [villageId]);
+  useEffect(() => { setItems([]); setLoaded(false); void refresh(); const timer = setInterval(() => void refresh(), 4000); return () => clearInterval(timer); }, [refresh]);
+  useEffect(() => { setConfirm(null); setReason(''); }, [villageId, mode, day]);
+  async function transition() {
+    if (!confirm) return; setBusy(true);
+    try { await api(`/actions/${encodeURIComponent(confirm.id)}/${confirm.operation}`, { method: 'POST', body: JSON.stringify(confirm.operation === 'reject' ? { reason: reason.trim() } : {}) }); setConfirm(null); setReason(''); await refresh(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  }
+  const visible = items.filter(item => item.mode === mode && (mode === 'live' || item.day === day));
+  return <section className="pf-inbox" aria-label="Kotak keputusan"><header><span className="pf-inbox-kicker">KENDALI OPERATOR</span><h3>Keputusan lapangan</h3><p>Usulan memerlukan persetujuan Anda. Disetujui belum berarti dilaksanakan.</p></header>
+    {error && <p className="pf-inbox-error" role="alert">{error} Data terakhir mungkin kedaluwarsa.</p>}
+    {!loaded && !error && <p>Memuat keputusan…</p>}{loaded && !visible.length && <p className="pf-inbox-empty">Belum ada usulan untuk konteks ini. Laporan terkonfirmasi akan ditinjau Planner.</p>}
+    {visible.map(action => <article className="pf-inbox-card" key={action.id}><div className="pf-inbox-cardtop"><span>{action.kind === 'verify' ? 'Perlu dicek' : 'Usulan tindakan'}</span><span>{({ proposed: 'Menunggu persetujuan', approved: 'Disetujui · belum dilaksanakan', rejected: 'Ditolak', done: 'Selesai' } as Record<string, string>)[action.status] ?? action.status}</span></div><h4>{action.title}</h4><p>{action.reason}</p>
+      {action.kind !== 'verify' && <p className="pf-inbox-impact">{benefitText(action)}</p>}<small>{action.anonymous ? 'Pelapor anonim' : `Pelapor: ${action.responder_id}`}</small>
+      <details><summary>Kenapa usulan ini?</summary><p>Verifier: {action.verifier.decision === 'forward' ? 'Kuat' : action.verifier.decision === 'hold' ? 'Lemah · perlu pemeriksaan' : 'Cukup · ada catatan'}</p><ul>{action.verifier.checks.map((check, index) => <li key={`${check.name}-${index}`}>{({ confirmed: 'Laporan dikonfirmasi', water_table_discrepancy: 'Kesesuaian laporan dengan model', hotspots_2km_48h: 'Deteksi panas sekitar laporan', exact_tool_benefit: 'Manfaat sesuai hasil engine' } as Record<string, string>)[check.name] ?? check.name}: {check.passed === null ? 'data tidak tersedia' : check.passed ? 'lolos' : 'perlu perhatian'}{check.reason ? ` · ${check.reason}` : ''}</li>)}</ul>{action.simulation_reason && <p>Alasan model: {action.simulation_reason}</p>}{action.assumptions?.map(text => <p key={text}>{text}</p>)}<p>Perkiraan model, belum diukur. Deteksi panas bukan api terkonfirmasi.</p></details>
+      {action.status === 'proposed' && <div className="pf-inbox-buttons"><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'approve' }); setReason(''); }}>{action.kind === 'verify' ? 'Kirim petugas' : 'Setujui'}</button><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'reject' }); setReason(''); }}>Tolak</button></div>}
+      {confirm?.id === action.id && <div className="pf-inbox-confirm" role="group" aria-label="Konfirmasi keputusan"><p>{confirm.operation === 'approve' ? 'Setujui usulan dan kirim tindak lanjut simulasi kepada pelapor? Pelaksanaan tetap belum dikonfirmasi.' : 'Tolak usulan ini? Catat alasannya.'}</p>{confirm.operation === 'reject' && <label>Alasan penolakan<textarea maxLength={500} value={reason} onChange={e => setReason(e.target.value)} /></label>}<div className="pf-inbox-buttons"><button disabled={busy || (confirm.operation === 'reject' && !reason.trim())} onClick={() => void transition()}>{busy ? 'Menyimpan…' : 'Konfirmasi'}</button><button disabled={busy} onClick={() => setConfirm(null)}>Batal</button></div></div>}
+    </article>)}{hidden > 0 && <p className="pf-inbox-muted">{hidden} usulan lama disembunyikan (kedaluwarsa/digantikan).</p>}
+  </section>;
+}
+
+export function SmsLoop({ villageId, mode, day }: InboxProps) {
+  const threadContext = useRef('');
+  const [responders, setResponders] = useState<Responder[]>([]), [selected, setSelected] = useState(''), [messages, setMessages] = useState<Message[]>([]), [progress, setProgress] = useState<Progress | null>(null), [config, setConfig] = useState<Config | null>(null);
+  const [error, setError] = useState(''), [busy, setBusy] = useState(false), [text, setText] = useState('AIR 61 ASAP YA dekat kanal 4'), [notice, setNotice] = useState('');
+  useEffect(() => { let active = true; api<{ items: Responder[] }>(`/responders${villageId ? `?village_id=${encodeURIComponent(villageId)}` : ''}`).then(result => { if (!active) return; setResponders(result.items); setSelected(result.items.find(item => item.id === 'r1')?.id ?? result.items[0]?.id ?? ''); }).catch(e => { if (active) setError(errorText(e)); }); api<Config>('/config').then(result => { if (active) setConfig(result); }).catch(e => { if (active) setError(errorText(e)); }); return () => { active = false; }; }, [villageId]);
+  threadContext.current = selected;
+  const refresh = useCallback(async () => { if (!selected) return; try { const [thread, state] = await Promise.all([api<{ items: Message[] }>(`/responders/${encodeURIComponent(selected)}/messages`), api<Progress>(`/demo/progress?responder_id=${encodeURIComponent(selected)}`)]); if (threadContext.current !== selected) return; setMessages(thread.items); setProgress(state); setError(''); } catch (e) { setError(errorText(e)); } }, [selected]);
+  useEffect(() => { setMessages([]); setProgress(null); void refresh(); const timer = setInterval(() => void refresh(), 4000); return () => clearInterval(timer); }, [refresh]);
+  async function send(alert = false, input = text) {
+    const responder = responders.find(item => item.id === selected); if (!responder) return; setBusy(true); setNotice('');
+    try { if (alert) { const result = await api<{ notified: number; suppressed: number }>('/events/risk-changed', { method: 'POST', body: JSON.stringify({ village_id: responder.village_id, mode, day: mode === 'live' ? 0 : day, ...((mode === 'replay' || config?.mode === 'mock') ? { hour_override: 10 } : {}) }) }); setNotice(`Pemicu diproses: ${result.notified} diberi notifikasi, ${result.suppressed} ditahan.`); } else { await api('/demo/inbound', { method: 'POST', body: JSON.stringify({ responder_id: selected, text: input, mode, day: mode === 'live' ? 0 : day }) }); setText(''); } await refresh(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  }
+  const enabled = config?.public_demo === true && !!selected;
+  return <section className="pf-inbox pf-sms" aria-label="Simulator SMS operator"><header><span className="pf-inbox-kicker">KANAL SIMULASI</span><h3>Alur SMS lapangan</h3><p>Simulasi operator · tidak mengirim SMS nyata. AIR 61 adalah contoh laporan demo yang diketik operator.</p></header><label>Responden<select value={selected} onChange={e => setSelected(e.target.value)}>{responders.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>{!responders.length && <p>Responden belum tersedia.</p>}
+    <button className="pf-inbox-alert" disabled={!enabled || busy} onClick={() => void send(true)}>1. Picu peringatan model</button>{notice && <p role="status">{notice}</p>}
+    {error && <p className="pf-inbox-error" role="alert">{error}</p>}{config && !config.public_demo && <p>Simulator tersedia hanya dalam demo terbuka.</p>}
+    {progress && <><ol className="pf-inbox-steps">{progress.steps.map(step => <li key={step.id} className={step.done ? 'pf-inbox-stepdone' : ''}><span>{step.done ? '✓' : '○'}</span>{step.label}</li>)}</ol><p className="pf-inbox-muted">Status tersimpan: {progress.state} · {progress.mode} / hari {progress.day}</p>{(progress.mode !== mode || (mode === 'replay' && progress.day !== day)) && <p>Progres berasal dari konteks sebelumnya. Picu peringatan untuk konteks saat ini.</p>}</>}
+    <div className="pf-inbox-thread" role="log" aria-label="Pesan tersimpan">{messages.map(message => <div className={`pf-inbox-message ${message.direction === 'inbound' ? 'pf-inbox-inbound' : ''}`} key={message.id}><small>{message.direction === 'inbound' ? 'Responden' : 'Warden'} · {message.channel} · {message.status}</small><p>{message.body}</p></div>)}{!messages.length && <p>Belum ada pesan tersimpan.</p>}</div>
+    <form onSubmit={e => { e.preventDefault(); if (text.trim()) void send(); }}><label>Laporan contoh / balasan<textarea value={text} maxLength={500} onChange={e => setText(e.target.value)} placeholder="AIR 61 ASAP YA dekat kanal 4" /></label><div className="pf-inbox-buttons"><button disabled={!enabled || busy || !text.trim()}>Kirim laporan</button><button type="button" disabled={!enabled || busy || progress?.state !== 'confirm' || progress?.mode !== mode || progress?.day !== (mode === 'live' ? 0 : day)} onClick={() => void send(false, 'YA')}>YA · konfirmasi baca ulang</button></div></form><p className="pf-inbox-muted">Baca ulang pesan Warden sebelum YA tersendiri. Setelah usulan muncul, setujui melalui kotak keputusan; tindak lanjut akan muncul di utas ini.</p>
+  </section>;
+}
+
+
+

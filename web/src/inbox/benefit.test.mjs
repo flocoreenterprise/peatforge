@@ -1,0 +1,22 @@
+// Isolated formatter checks; no server requests and no demo-state writes.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import vm from 'node:vm';
+const source = readFileSync(new URL('./DecisionInbox.tsx', import.meta.url), 'utf8');
+const start = source.indexOf('export function benefitText');
+const end = source.indexOf('export default function', start);
+const compiled = ts.transpileModule(source.slice(start, end), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const context = { exports: {} };
+vm.runInNewContext(compiled, context);
+const format = context.exports.benefitText;
+const base = { days_bought: null, at_least_days: null, benefit: { wt_gain_cm: null, pfvi_reduction: null } };
+assert.equal(format(base), 'Tambahan hari belum tersedia');
+assert.equal(format({ ...base, days_bought: 9 }), '+9 hari menuju ambang kritis model');
+assert.match(format({ ...base, at_least_days: 4 }), /Setidaknya \+4 hari/);
+assert.match(format({ ...base, days_bought: 0 }), /Tidak ada penundaan/);
+assert.match(format({ ...base, days_bought: 0, simulation_reason: 'baseline_already_critical' }), /sudah tercapai/);
+assert.match(format({ ...base, benefit: { wt_gain_cm: 0, pfvi_reduction: 7 } }), /0 cm.*PFVI turun 7/);
+assert.doesNotMatch(format({ ...base, days_bought: 0 }), /aman/);
+console.log('PASS: 7 benefit formatter assertions; no API mutation');
+

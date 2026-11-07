@@ -1,4 +1,4 @@
-export type Config = { mode: string; public_demo?: boolean; poll_ms: number; field_poll_ms: number; voice_available: boolean };
+export type Config = { mode: string; public_demo?: boolean; source?: string; poll_ms: number; field_poll_ms: number; voice_available: boolean };
 export type Village = { id: string; name: string; code: string; lat: number; lon: number; source: string };
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -9,7 +9,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const response = await fetch(`/api${path}`, {
     ...options, credentials: 'same-origin',
     headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
-    signal: options.signal ?? AbortSignal.timeout(12000),
+    signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(12000)]) : AbortSignal.timeout(12000),
   });
   if (response.status === 401) window.dispatchEvent(new Event('peatforge:unauthorized'));
   if (!response.ok) {
