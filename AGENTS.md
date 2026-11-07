@@ -64,3 +64,17 @@ Hard rules:
 - Tests use temporary state; never mutate demo state. Arithmetic, thresholds, dates and benefits come from deterministic code/tools.
 - Distinguish measured observation, model estimate, fixture, cached data and historical perfect-forecast replay.
 - Contract examples are illustrative fixtures, never measurements or promised scientific outcomes.
+
+## Team lead course correction — latest, overrides older schedule/scope above
+
+- Official start 09:31 WIB, 2026-11-07. Feature freeze stays 13:00; confirm with user only if organizers' deadline differs.
+- Commit finished tasks individually with actual test commands/results in commit messages.
+- Must-have demo by 12:00, gated in this order: (a) A3 PFVI -> A4 Days Bought/Replay -> A5 API on real cached data,
+  labelled modelled; (b) B3 Warden -> B5 Planner/Verifier -> complete mock-delivery SMS loop;
+  (c) C2 map -> C3 approve/reject inbox -> C4 summary-first village detail, polling 4 seconds.
+- Do not start other work before those gates pass. Existing foundations remain; do not restart.
+- 12:00-12:30 integration on one server + one tunnel. Real SMS/B6a only if full loop is green and credentials/receiver are ready.
+- CUT NOW: A6 adaptive, A7 QA, national/C7, 3D, Telegram, B6b Realtime, trace drawer, ask bar.
+- Auditor after each block, max 5 minutes. Security review once before opening the integrated tunnel.
+- Reference visuals only from screenshots supplied by user. Do not browse the old example application or open rehearsal source.
+- Every 30 minutes report five lines: done / in progress / blocked / next / cut.

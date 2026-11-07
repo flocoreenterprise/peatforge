@@ -42,3 +42,15 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - B1 commit ff92501; 14 offline tests pass, including public/protected database scope separation after Luna audit.
 - Root dependency environment created. PowerShell launch scripts parse successfully; actual launch succeeded on 8000.
 - Real provider retrieval checks begun independently of credentials. No messages/calls sent.
+
+### Course correction and finished commits
+
+- Team lead establishes official start09:31, must-have demo12:00, integration12:00-12:30, freeze13:00.
+- A2 commit6859ba6:25 engine testsPASS, steep-profile monotonicity fixed after Luna audit.
+- C1 commitac9e334: buildPASS, API behaviorPASS, dependency audit0; initial cloud QA found and fixed mobile attribution,
+  missing retry label and muted contrast. Final desktop screenshot evidence needs recapture.
+- B2 commitefa0d41:22 combined backend testsPASS. Security found noP0/P1; nested authenticated JSON now controlled422.
+- Public fetch checks succeeded: forecast14, archive2019-06-15..2019-08-29 76, BMKG1 village result,
+  NASA regional hotspot56916 records from both feeds (not village fires). Cache runtime/engine/http.
+- Preview tunnel closed on course correction. Integrated tunnel will open after final security gate.
+- Scope/cuts and source-behavior mapping tracked in FEATURE_PARITY.md. Visual reference only user-supplied screenshots.
