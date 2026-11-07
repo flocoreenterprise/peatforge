@@ -29,6 +29,8 @@ Hard rules:
 - Builders own only their assigned folder: Lead `engine/`, CS #1 `agents/`, CS #2 `web/`.
 - One prompt from the pack per task. Never run two writers in the same folder at once.
 - No changes to another owner's files; report needed changes to the orchestrator.
+- Latest user override: skip login now, show the operator openly. PUBLIC_DEMO defaults true; fixture data and mock outbound only.
+  Preserve PIN auth for protected mode (PUBLIC_DEMO=false). Public demo must not access live contacts or send live SMS/calls.
 
 ## Execution and review
 
@@ -54,7 +56,7 @@ Hard rules:
 
 - User enters configuration only through `scripts/set-secrets.ps1`; never ask for keys in chat or print/log them.
 - Do not inspect `.env` contents or expose field tokens, full phone numbers, PINs, auth cookies or webhook URLs with secrets.
-- `.env.example` has names with empty values only. No generated or printed fallback PIN; missing auth configuration fails closed.
+- `.env.example` has names with empty values only. No generated or printed fallback PIN; missing auth configuration fails closed in protected mode.
 - Network adapters remain mocked until configured. No live SMS/call merely to test without the user's chosen recipient.
 - Tests use temporary state; never mutate demo state. Arithmetic, thresholds, dates and benefits come from deterministic code/tools.
 - Distinguish measured observation, model estimate, fixture, cached data and historical perfect-forecast replay.

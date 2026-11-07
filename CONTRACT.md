@@ -45,6 +45,11 @@ Changes require orchestrator agreement. Phase 2 has been authorized by the user'
 
 ## Auth, secrets and external effects
 
+- Latest user override: show operator openly now; no secrets setup yet. PUBLIC_DEMO=true is the default for blank/unset values.
+  In this explicit public demo, operator dependency permits access, engine uses fixtures, outbound adapters are mocked,
+  and storage is a separate fixture-only database. Return public_demo:true and render a visible simulation badge.
+  Never expose real responder contacts, secrets or provider-backed actions in public demo even if credentials exist.
+  PUBLIC_DEMO=false enables protected operation and the following PIN requirements.
 - Every operator route has a shared auth dependency, including config, trace, simulate and outbound calls.
 - PIN six digits, HttpOnly HMAC cookie 12 hours, SameSite strict/lax, Secure on HTTPS; 5 login attempts/min/IP.
 - Fail closed when DEMO_PIN or SESSION_SECRET missing. No printed fallback PIN and no public auth bypass.
@@ -76,7 +81,7 @@ Example objects referenced below are defined next. Routes marked optional are cu
 | POST /api/auth/login | P | {"pin":"<masked input>"} | {"authenticated":true}; cookie |
 | POST /api/auth/logout | P | none | {"authenticated":false}; clears cookie |
 | GET /api/auth/session | P | cookie | {"authenticated":false} |
-| GET /api/config | O | none | {"mode":"mock","poll_ms":4000,"field_poll_ms":3000,"voice_available":false} |
+| GET /api/config | O | none | {"mode":"mock","public_demo":true,"poll_ms":4000,"field_poll_ms":3000,"voice_available":false} |
 | GET /api/villages | O | none | {"items":[Village]} |
 | GET /api/villages/{id}/status | O | mode,day | Status |
 | GET /api/villages/{id}/forecast | O | days=14,mode,day | {"items":[ForecastPoint]} |
@@ -190,6 +195,7 @@ Anonymous mapping retained privately for follow-up; mask operator responses and 
 
 | Name | When needed / validation |
 | --- | --- |
+| PUBLIC_DEMO | true/false; blank/unset defaults true per user; true = open fixture-only demo, no real channels |
 | DEMO_PIN | Required for operator login; exactly 6 digits; masked |
 | SESSION_SECRET | Required auth HMAC; >=32 characters; masked |
 | CONTACT_ENCRYPTION_KEY | Required before binding real phone; Fernet 32-byte URL-safe base64 key |
