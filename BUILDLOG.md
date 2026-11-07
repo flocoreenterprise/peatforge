@@ -132,3 +132,5 @@ Next: user completes billing upgrade; verify account and await explicit authoriz
 Cut: invented land cover, rainy-season claim without evidence, OSM retries, September replay, anywhere/volunteers/offline/status page.
 
 - 15:35 public-demo block: DEMO_PUBLIC=1 forces isolated mock channels and blocks live delivery/callbacks; UI Simulated labels and one-click example response; validating full pipeline and build.
+
+- 15:37 browser voice: server-owned one-use SDP handshake,120s deadline/provider hangup, persisted20/hour cap and friendly fallback;21 focused Python tests PASS, frontend build PASS.

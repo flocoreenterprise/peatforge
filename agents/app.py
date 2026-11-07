@@ -31,6 +31,7 @@ from .field import FieldService
 from .security import SecurityHeaders
 from .voice import VoiceService,VoiceSettings
 from .realtime import Access,BrowserVoice,Settings as BrowserSettings
+from .demo_voice import DemoVoice
 from .phone_realtime import PhoneRealtime
 from .scout import decision,sms_policy
 from .public_reports import PublicReports,router as public_router
@@ -134,6 +135,9 @@ class BrowserTool(Model):
 class BrowserEnd(Model):
     session_id:str=Field(min_length=1,max_length=80)
 
+class BrowserConnect(BrowserEnd):
+    sdp:str=Field(min_length=3,max_length=65536)
+
 
 class BrowserSimulate(BrowserStart):
     session_id:str|None=Field(default=None,min_length=1,max_length=80)
@@ -195,7 +199,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.warden.on_call=app.state.scout.place_call
         app.state.field=FieldService(database,app.state.channels)
         app.state.voice=VoiceService(database,app.state.tools,app.state.channels,app.state.warden,VoiceSettings.from_environment())
-        app.state.browser_voice=BrowserVoice(database,app.state.tools,app.state.channels,app.state.voice,BrowserSettings.from_environment())
+        browser_class=DemoVoice if demo_public else BrowserVoice
+        app.state.browser_voice=browser_class(database,app.state.tools,app.state.channels,app.state.voice,BrowserSettings.from_environment())
         app.state.phone_realtime=PhoneRealtime(app.state.voice,app.state.browser_voice)
         app.state.channels.outbound_policy=lambda responder,channel:sms_policy(database,app.state.tools,responder,channel,
                                             datetime.fromtimestamp(app.state.voice.clock(),timezone.utc))
@@ -214,6 +219,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         try:
             yield
         finally:
+            if demo_public:
+                await asyncio.to_thread(app.state.browser_voice.close)
             await app.state.phone_realtime.close()
             if task:
                 task.cancel()
@@ -261,7 +268,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         if exception.status_code==405 and request.url.path.startswith('/api/field/'):
             return JSONResponse({'error':{'code':'not_found','message':'Data tidak ditemukan'}},status_code=404)
         code = {401: 'unauthorized', 403: 'forbidden', 409: 'conflict', 404: 'not_found',429:'rate_limited',503:'unavailable'}.get(exception.status_code, 'invalid')
-        message={401:'Akses ditolak',403:'Akses ditolak',404:'Data tidak ditemukan',429:'Terlalu banyak permintaan',503:'Layanan belum tersedia'}.get(exception.status_code,'Status tidak mengizinkan perubahan')
+        message={401:'Akses ditolak',403:'Akses ditolak',404:'Data tidak ditemukan',429:'Batas demo tercapai. Coba lagi nanti atau gunakan Simulasi teks.' if demo_public and request.url.path.startswith('/api/voice/') else 'Terlalu banyak permintaan',503:'Layanan belum tersedia'}.get(exception.status_code,'Status tidak mengizinkan perubahan')
         return JSONResponse({'error': {'code': code, 'message': message}}, status_code=exception.status_code)
 
     app.include_router(create_router(service=engine), prefix='/api', dependencies=[Depends(require_operator)])
@@ -447,6 +454,13 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     def browser_transcript(request:Request,body:BrowserTranscript):
         access=browser_access(request,session_id=body.session_id)
         return app.state.browser_voice.transcript(access,body.session_id,body.event_id,body.role,body.text)
+
+    @app.post('/api/voice/connect')
+    async def browser_connect(request:Request,body:BrowserConnect):
+        if not demo_public:
+            raise HTTPException(404,'Not found')
+        access=browser_access(request,session_id=body.session_id)
+        return await asyncio.to_thread(app.state.browser_voice.connect,access,body.session_id,body.sdp)
 
     @app.post('/api/voice/tool')
     def browser_tool(request:Request,body:BrowserTool):

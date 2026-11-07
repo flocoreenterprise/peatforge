@@ -8,7 +8,7 @@ import './voice.css';
 
 export type VoicePanelProps = { fieldToken?: string; responderId?: string; mode?: 'live' | 'replay'; day?: number };
 type Phase = 'idle' | 'connecting' | 'live' | 'simulation' | 'ended' | 'denied';
-type Session = { session_id: string; client_secret: string; expires_at: number | string; session_expires_at?: number | string; model: string; voice: string };
+type Session = { session_id: string; client_secret?: string; server_connect?: boolean; expires_at: number | string; session_expires_at?: number | string; model: string; voice: string };
 type Simulation = { items: { id?: string; role?: string; direction?: string; text?: string; body?: string }[]; state?: string; session_id?: string; ended?: boolean };
 class VoiceError extends Error { constructor(public status: number) { super('Layanan suara belum tersedia.'); } }
 const denied = (error: unknown) => error instanceof VoiceError && [401, 403, 404].includes(error.status);
@@ -59,7 +59,7 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
       setNotice('Akses percakapan ditolak atau tautan sudah tidak berlaku.');
     } else {
       setPhase('simulation');
-      setNotice('Suara belum tersedia. Gunakan Simulasi teks; laporan diproses oleh Warden yang sama.');
+      setNotice(error instanceof VoiceError && error.status === 429 ? 'Batas demo tercapai (demo limit reached). Coba lagi nanti atau gunakan Simulasi teks.' : 'Suara belum tersedia. Gunakan Simulasi teks; laporan diproses oleh Warden yang sama.');
     }
   }
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
       // Only this explicit button handler may request microphone access.
       const session = await request<Session>('session', bodyScope(), controller.signal);
       if (!active()) return;
-      if (!session.session_id || typeof session.client_secret !== 'string' || !session.client_secret) throw new Error('Sesi tidak tersedia.');
+      if (!session.session_id || (!session.server_connect && (typeof session.client_secret !== 'string' || !session.client_secret))) throw new Error('Sesi tidak tersedia.');
       const sessionId = session.session_id;
       const endBody = { session_id: sessionId };
       closeServer.current = () => { void request('end', endBody, new AbortController().signal).catch(() => {}); };
@@ -168,15 +168,20 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
       if (!active()) return;
       await pc.setLocalDescription(offer);
       if (!ephemeralCurrent(session.expires_at)) throw new Error('Sesi kedaluwarsa.');
-      let ephemeral = session.client_secret; session.client_secret = '';
-      const response = await fetch('https://api.openai.com/v1/realtime/calls', {
-        method: 'POST', headers: { Authorization: `Bearer ${ephemeral}`, 'Content-Type': 'application/sdp' },
-        body: offer.sdp, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]), credentials: 'omit', referrerPolicy: 'no-referrer',
-      });
-      ephemeral = '';
-      // Provider authentication errors are service failures; application auth was checked above.
-      if (!response.ok) throw new Error('Layanan suara belum tersedia.');
-      const sdp = await response.text();
+      let sdp: string;
+      if (session.server_connect) {
+        const answer = await request<{ sdp: string }>('connect', { session_id: sessionId, sdp: offer.sdp }, controller.signal);
+        sdp = answer.sdp;
+      } else {
+        let ephemeral = session.client_secret; session.client_secret = '';
+        const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+          method: 'POST', headers: { Authorization: `Bearer ${ephemeral}`, 'Content-Type': 'application/sdp' },
+          body: offer.sdp, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]), credentials: 'omit', referrerPolicy: 'no-referrer',
+        });
+        ephemeral = '';
+        if (!response.ok) throw new Error('Layanan suara belum tersedia.');
+        sdp = await response.text();
+      }
       if (!active()) return;
       await pc.setRemoteDescription({ type: 'answer', sdp });
       const connectionTimer = setTimeout(() => { if (active() && channel.readyState !== 'open') fail(new Error('Sambungan terputus.'), version); }, 20000);
@@ -214,11 +219,11 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
     }
   }
 
-  return <section className="voice-panel" aria-label="Telepon Warden">
-    <div className="voice-heading"><div><h3>Telepon Warden</h3><p>Laporan suara dan konfirmasi lapangan.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
-    <p className="voice-privacy">Mikrofon aktif setelah Anda menekan Telepon Warden. Suara langsung diproses OpenAI dan transkrip disimpan. Laporan dicatat setelah konfirmasi YA; tindakan lapangan perlu persetujuan operator.</p>
+  return <section className="voice-panel" aria-label="Talk to Warden">
+    <div className="voice-heading"><div><h3>Talk to Warden</h3><p>GPT Realtime live · suara browser.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
+    <p className="voice-privacy">Demo publik: maksimal 2 menit/sesi, 20 sesi/jam untuk semua pengunjung. SMS/telepon tetap Simulated. Mikrofon aktif setelah Anda menekan Talk to Warden. Suara langsung diproses OpenAI dan transkrip disimpan. Laporan dicatat setelah konfirmasi YA; tindakan lapangan perlu persetujuan operator.</p>
     <div className="voice-actions">
-      {phase !== 'live' && phase !== 'connecting' && <button type="button" disabled={phase === 'denied' || sending} onClick={() => void start()}>Telepon Warden</button>}
+      {phase !== 'live' && phase !== 'connecting' && <button type="button" disabled={phase === 'denied' || sending} onClick={() => void start()}>Talk to Warden</button>}
       {(phase === 'live' || phase === 'connecting') && <>
         <button type="button" disabled={phase !== 'live'} aria-pressed={muted} onClick={() => { const next = !muted; mutedRef.current = next; stream.current?.getAudioTracks().forEach(track => { track.enabled = !next && !audioBusy.current; }); setMuted(next); }}>{muted ? 'Aktifkan mikrofon' : 'Bisukan mikrofon'}</button>
         <button type="button" className="voice-end" onClick={() => { dispose(); setMuted(false); setPhase('ended'); setNotice('Panggilan diakhiri.'); }}>Akhiri</button>

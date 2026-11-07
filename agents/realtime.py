@@ -132,9 +132,10 @@ def normalized_script(text):
 
 
 class BrowserVoice:
-    def __init__(self,database,tools,channels,coordinator,settings:Settings, *,clock=time.time,transport=None):
+    def __init__(self,database,tools,channels,coordinator,settings:Settings, *,clock=time.time,transport=None,lifetime=TTL):
         self.db,self.tools,self.channels,self.coordinator,self.settings=database,tools,channels,coordinator,settings
         self.clock,self.transport=clock,transport
+        self.lifetime=lifetime
         self.mint_limit=RateLimit(5,clock=lambda:self.clock())
         self.global_limit=RateLimit(20,clock=lambda:self.clock())
         self.sim_limit=RateLimit(30,clock=lambda:self.clock())
@@ -177,7 +178,7 @@ class BrowserVoice:
         current=self.db.get('warden:'+access.responder_id,{})
         trace=current.get('trace_id') if (current.get('mode','live'),current.get('day',0))==(access.mode,access.day) else None
         session={'id':identifier('bv'),'owner':access.owner,'responder_id':access.responder_id,'village_id':access.village_id,
-                 'mode':access.mode,'day':access.day,'expires_at':self.clock()+TTL,'offline':offline,
+                 'mode':access.mode,'day':access.day,'expires_at':self.clock()+self.lifetime,'offline':offline,
                  'transcripts':{},'tool_results':{},'seq':0,'consumed_seq':0,'allowed_numbers':[],'allowed_urls':[],
                  'coordinator':{'responder_id':access.responder_id,'mode':access.mode,'day':access.day,'trace_id':trace,
                                 'stage':'consent','turn':0,'empty':0,'rounds':0,'report':{},'diagnostic':False}}
