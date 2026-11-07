@@ -84,3 +84,5 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - C5: proposal-linked actual agent event timeline and scoped transcript, polling4s; isolatedstrictTS and rootwebbuild PASS; shared App wiring included in upcoming integration commit.
 - C7 light: exact province polygon counts on pinned2017/34-unit data, cached5min; engine67tests PASS inclroutebounds/pointomission; strictTS+webbuild PASS; realcache classification5.26s, no nationalrisk claims.
 - B8/integration: configured PIN/cookies, scoped responderlinks+3sfieldUI, protectedmock default, URLredaction/CSP, asyncSMSoffload, Scout/C5/C7/A6UI wiring; root133tests+33subtests PASS; webbuild+20formatterassertions PASS; secretsetupshape/uniqueness PASS.
+
+- QA1 Scout: existing cloud POST route verified and banner absent; public-demo Scout failures stay in a quiet retry status instead of main banner; Scout11tests PASS, webbuild PASS.

@@ -41,6 +41,7 @@ function CommandApp() {
   const selected = villages.find(v => v.id === selectedId) ?? villages[0];
   const selectedDate = replayDate(meta, day);
   const [connection, setConnection] = useState('');
+  const scoutBanner = config?.public_demo ? '' : scoutError;
 
 
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('peatforge-theme', dark ? 'dark' : 'light'); }, [dark]);
@@ -106,12 +107,12 @@ function CommandApp() {
 
   return <main className="command-screen">
     <header className="topbar"><Brand/><div className="header-divider"/><button className="text-button scope-switch" onClick={() => setScope(scope === 'pilot' ? 'national' : 'pilot')}>{scope === 'pilot' ? 'Seluruh Indonesia' : 'Wilayah pilot'}</button><div className="topbar-right"><span className="connection-indicator"><i className={connection || preview ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection ? 'Terputus' : 'Terhubung'}</span>{themeButton}{preview ? <button className="text-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={16}/><span>Coba hubungkan</span></button> : !config?.public_demo && <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div></header>
-    <section className={`command-body ${preview || pilot.error || scoutError || connection ? 'has-banner' : ''}`}>
+    <section className={`command-body ${preview || pilot.error || scoutBanner || connection ? 'has-banner' : ''}`}>
       {scope === 'national' ? <div className="national-shell"><NationalView/></div> : <>
       <MapCanvas dark={dark} villages={villages} risk={risk} hotspots={hotspots} selectedId={selected?.id ?? null} onSelect={selectVillage}/>
       <section className="replay-control glass-panel" aria-label="Waktu pantauan"><div className="mode-switch"><button className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>{mode === 'replay' && <div className="replay-slider"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari replay" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/><span>ERA5 · prakiraan sempurna historis</span></div>}</section>
       <div className="workspace-toolbar"><div className="location-selector"><MapPin size={16}/><span>Wilayah pilot</span></div><span className="live-badge"><Radio size={13}/>{preview ? 'Pratinjau mock' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.mode === 'mock' ? 'Kanal simulasi' : 'LIVE'}</span><button className="drawer-toggle" onClick={() => setDrawer(!drawer)} aria-expanded={drawer} aria-label="Buka panel informasi">{drawer ? <X size={18}/> : <Menu size={18}/>}</button></div>
-      {(preview || pilot.error || scoutError || connection) && <div className="environment-banner" role="status">{connection || pilot.error || scoutError || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
+      {(preview || pilot.error || scoutBanner || connection) && <div className="environment-banner" role="status">{connection || pilot.error || scoutBanner || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
       <aside className="operations-panel glass-panel">
         <div className="panel-topline"><span className="eyebrow">MEJA OPERASI</span><span className="panel-counter">01 / PILOT</span></div>
         <h1>Gambut terpantau.<br/><span>Keputusan di tangan Anda.</span></h1>
@@ -125,7 +126,7 @@ function CommandApp() {
           {tab === 'Jejak' && <AgentTrace villageId={selected?.id} mode={mode} day={day}/>}
 
         </div>
-        <div className="panel-footer"><span><i/>{pilot.synced ? `Sinkron ${pilot.synced} WIB` : 'Belum ada pembaruan'}</span><span>Polling 4 dtk</span></div>
+        <div className="panel-footer"><span><i/>{pilot.synced ? `Sinkron ${pilot.synced} WIB` : 'Belum ada pembaruan'}</span><span>{scoutError && config?.public_demo ? 'Scout belum tersinkron · mencoba lagi' : 'Polling 4 dtk'}</span></div>
       </aside>
       <aside className={`context-panel glass-panel ${drawer ? 'drawer-open' : ''}`}><div className="context-heading"><span className="eyebrow">CARA MEMBACA PETA</span><Leaf size={18}/></div><h2>Kenali risikonya.<br/>Periksa buktinya.</h2><p>Warna risiko menunjukkan indeks rawan api. Data yang belum tersedia tidak berarti kondisi rendah risiko.</p><div className="risk-legend">{['Rendah', 'Sedang', 'Tinggi', 'Ekstrem'].map((level, i) => <div key={level}><i className={`risk-${i}`}/><span>{level}</span></div>)}</div><div className="model-note"><CircleHelp size={16}/><p>Air tanah: <strong>perkiraan model, belum diukur.</strong> Titik panas adalah deteksi satelit, bukan api terkonfirmasi.</p></div><div className="hotspot-note"><strong>Titik panas · radius 5 km dari desa pilot</strong><p>{hotspots?.available === false ? mode === 'replay' ? 'Arsip titik panas tidak tersedia. Data live tidak diputar ulang.' : 'Data titik panas belum tersedia.' : hotspots ? `${number(hotspots.items.length)} deteksi dalam 72 jam · ${hotspots.source ?? 'NOAA-20/21'}${hotspots.stale ? ' · cache lama' : ''}` : 'Memuat deteksi satelit…'}</p><span>Data per {dateLabel(hotspots?.data_as_of)}</span><p>Oranye: &lt;24 jam · pudar: 24–72 jam.</p></div><div className="context-bottom"><Check size={14}/><span>Manusia memegang keputusan akhir</span></div></aside>
       <div className="map-bottom-note"><span>WILAYAH PILOT</span><span>Titik desa BMKG · tanpa batas atau geometri kanal</span></div>
