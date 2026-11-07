@@ -142,6 +142,10 @@ Hard rules:
 - Then reimplement A7 from scratch in engine/, classified events/API and minimal web labels/badges only; no layout changes. This explicitly reopens the requested web labels despite earlier freeze. New block must be green by15:00 then freeze. Never open rehearsal. Sol builders, Luna five-minute audit, tests, commit and push; CONTRACT exact examples required.
 - Fire classifications are model/rule-based candidates, not confirmed fires. Unavailable vegetation/peat/OSM evidence stays uncertain; never invent land cover or seasonal evidence.
 
-## Public shipping override — 15:32 WIB
+## Public shipping override - 15:32 WIB
 - Ship by16:05, submission16:30. Root implements three green commits and pushes each: DEMO_PUBLIC=1 simulation isolation; browser Realtime120s/20sessions per hour; public dashboard deployment and clean-browser QA.
 - No real Twilio/SMS, no secret or .env changes. Existing keys are read at runtime only. Public mode must never open the protected database.
+
+## Two-instance shipping override
+- Keep protected operator on8000 with PIN and a callback-only tunnel; public DEMO_PUBLIC=1 on8001 has its own tunnel and database. Protected real delivery remains available for a separately attended stage call; do not place any call while checking deployment.
+- Runtime PUBLIC_BASE_URL overrides are process-local. Never convert the protected callback host into a public dashboard. Root completes integration directly; no new layout work.

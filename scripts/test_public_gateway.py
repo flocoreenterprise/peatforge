@@ -5,6 +5,35 @@ import pytest
 from scripts.public_gateway import Boundary, PublicIngress, authorities
 
 
+def test_demo_dashboard_allowlist_and_protected_tunnel_are_separate():
+    from scripts.public_gateway import ProtectedTunnel
+    demo=app()
+    demo.state.demo_public=True
+    client=TestClient(Boundary(demo,port=8001,public=True,public_base='https://demo.example',dashboard_demo=True),base_url='https://demo.example')
+    for path in ('/','/api/config','/api/actions','/api/map/risk','/api/replay/meta','/api/responders/r1/messages'):
+        assert client.get(path).status_code==200
+    for path in ('/api/demo/inbound','/api/actions/a1/approve','/api/voice/session','/api/voice/connect'):
+        assert client.post(path).status_code==200
+    for path in ('/api/voice/twilio/call','/api/voice/twilio/twiml/start','/api/responders/r1/send','/api/channels/sms/inbound'):
+        assert client.post(path).status_code==403
+    assert client.post('/api/warmup').status_code==404
+    assert client.post('/api/observations').status_code==404
+    assert client.post('/api/voice/connect',content=b'a'*131073).status_code==413
+    assert client.post('/api/voice/session',headers={'Origin':'https://evil.example'}).status_code==403
+    with pytest.raises(ValueError):
+        Boundary(app(),port=8001,public=True,dashboard_demo=True)
+    protected=ProtectedTunnel(app(),port=8000,public_base='https://phone.example')
+    remote=TestClient(protected,base_url='https://phone.example')
+    local=TestClient(protected,base_url='http://localhost:8000')
+    assert local.get('/').status_code==200
+    for path in ('/','/api/config','/api/actions','/lapor','/api/public/villages'):
+        assert remote.get(path).status_code==404
+    assert remote.post('/api/voice/twilio/twiml/start').status_code==200
+    assert remote.post('/api/voice/twilio/call').status_code==404
+    with remote.websocket_connect('wss://phone.example/api/voice/stream') as socket:
+        assert socket.receive_text()=='accepted'
+
+
 def app():
     api = FastAPI()
     @api.api_route('/{path:path}', methods=['GET','POST','PUT','DELETE','OPTIONS','HEAD'])

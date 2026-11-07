@@ -54,12 +54,12 @@ function CommandApp() {
   const initialize = useCallback(async () => {
     setError(''); setPhase('loading');
     try {
-      const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || next.public_reporting_enabled) setMode('live'); setPreview(false); setPhase('command');
+      const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || (next.public_reporting_enabled && !next.demo_public)) setMode('live'); setPreview(false); setPhase('command');
     } catch (failure) {
       if (failure instanceof ApiError && (failure.status === 401 || failure.status === 403)) { setPhase('login'); return; }
       // Only unavailable services activate the labelled, read-only shell preview.
       try {
-        const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || next.public_reporting_enabled) setMode('live'); setPreview(false); setPhase('command');
+        const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false || (next.public_reporting_enabled && !next.demo_public)) setMode('live'); setPreview(false); setPhase('command');
       } catch (configFailure) {
         if (configFailure instanceof ApiError && (configFailure.status === 401 || configFailure.status === 403)) { setPhase('login'); setError('Masuk dengan PIN operator untuk melanjutkan.'); return; }
         setConfig(mockConfig); setPreview(true); setPhase('command');
@@ -130,7 +130,7 @@ function CommandApp() {
         </section>
         <div className="command-sheet">
           <aside className="command-decisions" aria-label="Keputusan semua desa">
-            <header className="command-panel-heading"><span className="eyebrow">SEMUA DESA · {mode === 'replay' ? dateLabel(selectedDate) : 'KONDISI TERKINI'}</span><h1>Keputusan lapangan</h1><p>Periksa bukti dan manfaat model sebelum menyetujui tindakan. Disetujui belum berarti dilaksanakan.</p><span className="command-channel-status">{preview ? 'Pratinjau tanpa pengiriman' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.outbound === 'mock' || config?.mode === 'mock' ? 'Operator · kanal simulasi' : 'Operator · pengiriman diaktifkan'}</span></header>
+            <header className="command-panel-heading"><span className="eyebrow">SEMUA DESA · {mode === 'replay' ? dateLabel(selectedDate) : 'KONDISI TERKINI'}</span><h1>Keputusan lapangan</h1><p>Periksa bukti dan manfaat model sebelum menyetujui tindakan. Disetujui belum berarti dilaksanakan.</p><span className="command-channel-status">{preview ? 'Pratinjau tanpa pengiriman' : config?.public_demo ? 'Simulated · SMS, telepon, persetujuan & tindak lanjut' : config?.outbound === 'mock' || config?.mode === 'mock' ? 'Operator · kanal simulasi' : 'Operator · pengiriman diaktifkan'}</span></header>
             <DecisionInbox mode={mode} day={day} onShowLive={() => setMode('live')}/>
           </aside>
           <aside className="command-context" aria-label="Konteks desa terpilih">

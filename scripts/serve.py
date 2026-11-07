@@ -11,6 +11,9 @@ def main():
     parser.add_argument('--public-port',type=int,default=8001)
     parser.add_argument('--public-tunnel',action='store_true')
     parser.add_argument('--phone-uat',action='store_true')
+    parser.add_argument('--demo-tunnel',action='store_true')
+    parser.add_argument('--protected-tunnel',action='store_true')
+    parser.add_argument('--public-base',default='')
     args=parser.parse_args()
     if args.public_tunnel and not args.public_reporting:
         parser.error('--public-tunnel requires --public-reporting')
@@ -20,6 +23,27 @@ def main():
     sys.path.insert(0,str(root))
     from dotenv import load_dotenv
     load_dotenv(root/'.env',override=True)
+    if args.demo_tunnel or args.protected_tunnel:
+        if args.demo_tunnel and args.protected_tunnel or args.public_reporting or args.uat or args.phone_uat:
+            parser.error('Choose one isolated deployment mode')
+        import os
+        import uvicorn
+        from scripts.public_gateway import Boundary,ProtectedTunnel,authorities
+        authorities(args.port,args.public_base)
+        if not args.public_base:
+            parser.error('Deployment requires --public-base HTTPS origin')
+        os.environ['DEMO_PUBLIC']='1' if args.demo_tunnel else '0'
+        os.environ['PUBLIC_BASE_URL']=args.public_base
+        from agents.app import create_app
+        application=create_app(public_demo=args.demo_tunnel,background_scout=False)
+        if args.demo_tunnel:
+            application.state.config['public_reporting_enabled']=True
+            application.state.config['public_report_url']=args.public_base+'/lapor'
+            boundary=Boundary(application,port=args.port,public=True,public_base=args.public_base,dashboard_demo=True)
+        else:
+            boundary=ProtectedTunnel(application,port=args.port,public_base=args.public_base)
+        uvicorn.run(boundary,host='127.0.0.1',port=args.port,access_log=False,proxy_headers=False,ws_max_size=65536,ws_max_queue=4)
+        return
     if args.public_reporting:
         if args.uat or args.public_port == args.port:
             parser.error('Public reporting requires separate local/public ports and no UAT callbacks')

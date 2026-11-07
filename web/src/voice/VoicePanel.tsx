@@ -220,7 +220,7 @@ export default function VoicePanel({ fieldToken, responderId, mode = 'live', day
   }
 
   return <section className="voice-panel" aria-label="Talk to Warden">
-    <div className="voice-heading"><div><h3>Talk to Warden</h3><p>GPT Realtime live · suara browser.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
+    <div className="voice-heading"><div><h3>Talk to Warden</h3><p>GPT Realtime live - suara browser.</p></div><span className={`voice-badge voice-${phase}`}>{phase === 'simulation' ? 'Simulasi' : phase === 'live' ? 'Suara aktif' : phase === 'connecting' ? 'Menghubungkan' : phase === 'denied' ? 'Akses ditolak' : 'Siap'}</span></div>
     <p className="voice-privacy">Demo publik: maksimal 2 menit/sesi, 20 sesi/jam untuk semua pengunjung. SMS/telepon tetap Simulated. Mikrofon aktif setelah Anda menekan Talk to Warden. Suara langsung diproses OpenAI dan transkrip disimpan. Laporan dicatat setelah konfirmasi YA; tindakan lapangan perlu persetujuan operator.</p>
     <div className="voice-actions">
       {phase !== 'live' && phase !== 'connecting' && <button type="button" disabled={phase === 'denied' || sending} onClick={() => void start()}>Talk to Warden</button>}

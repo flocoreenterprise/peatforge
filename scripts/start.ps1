@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Install, [switch]$Build, [switch]$Uat, [switch]$PublicReporting, [switch]$PublicTunnel, [switch]$PhoneUat, [int]$Port = 8000, [int]$PublicPort = 8001)
+param([switch]$Install, [switch]$Build, [switch]$Uat, [switch]$PublicReporting, [switch]$PublicTunnel, [switch]$PhoneUat, [switch]$DemoTunnel, [switch]$ProtectedTunnel, [string]$PublicBase = '', [int]$Port = 8000, [int]$PublicPort = 8001)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
@@ -30,6 +30,9 @@ try {
     if ($PublicReporting) { $serverArguments += @('--public-reporting','--public-port',"$PublicPort") }
     if ($PublicTunnel) { $serverArguments += '--public-tunnel' }
     if ($PhoneUat) { $serverArguments += '--phone-uat' }
+    if ($DemoTunnel) { $serverArguments += '--demo-tunnel' }
+    if ($ProtectedTunnel) { $serverArguments += '--protected-tunnel' }
+    if ($PublicBase) { $serverArguments += @('--public-base',$PublicBase) }
     & .\.venv\Scripts\python.exe @serverArguments
     if ($LASTEXITCODE -ne 0) { throw 'Server exited with an error.' }
 } finally { Pop-Location }

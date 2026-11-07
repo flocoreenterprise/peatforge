@@ -134,3 +134,13 @@ Cut: invented land cover, rainy-season claim without evidence, OSM retries, Sept
 - 15:35 public-demo block: DEMO_PUBLIC=1 forces isolated mock channels and blocks live delivery/callbacks; UI Simulated labels and one-click example response; validating full pipeline and build.
 
 - 15:37 browser voice: server-owned one-use SDP handshake,120s deadline/provider hangup, persisted20/hour cap and friendly fallback;21 focused Python tests PASS, frontend build PASS.
+
+- 15:48 deployment: protected8000 PIN with callback-only tunnel; DEMO_PUBLIC8001 separate database/tunnel. Public fresh-origin browser replay critical jump and alert/report/readback/YA/proposal/approve/follow-up PASS; real delivery403. Live browser-protocol smoke PASS: session200, gpt-realtime-2.1/marin, SDP200, datachannel open,102 audio frames, transcript200, scoped status tool200, hangup200; no microphone input. Chrome microphone UI verification stopped by browser URL safety guard, not claimed. Full pytest260+41subtests PASS;16frontendfiles PASS;build PASS. No secrets/.env changes or real phone/SMS.
+
+Done: public simulation, capped GPT browser voice, isolated two-instance deployment.
+In progress: final clean commit/push and startup handoff.
+Blocked: automated Chrome microphone permission verification; direct user voice check remains.
+Next: share public link and protected callback origin before16:05.
+Cut: new features, visual polish, real phone/SMS tests.
+
+- Attended extra call requested during deployment: exactly one authenticated POST through protected8000 returned HTTP200, status suppressed, reason daily_call_limit. No provider POST, new Call SID or Twilio error code. Config/secrets/counters unchanged; no retry. Existing daily gate therefore still blocks the requested stage call until an explicitly implemented allowance is available.
