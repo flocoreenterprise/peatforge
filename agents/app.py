@@ -4,9 +4,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timezone
+from typing import Literal
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import Field
 from engine.api import create_router
 from engine.cache import DataUnavailable
@@ -22,6 +25,9 @@ from .warden import Warden, message_items
 from .planner import Planner
 from .scout import POLICY, Scout
 from .events import list_events, record
+from .auth import AuthSettings, COOKIE_NAME, OperatorAuth, SESSION_SECONDS, peer_ip, secure_cookie
+from .field import FieldService
+from .security import SecurityHeaders
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
 
@@ -50,8 +56,7 @@ def _database_scope(database: Database, public_demo: bool) -> None:
 
 
 def require_operator(request: Request) -> None:
-    if not request.app.state.public_demo:
-        raise HTTPException(401, 'Operator authentication unavailable')
+    request.app.state.auth.require(request)
 
 
 class DemoInbound(Model):
@@ -83,6 +88,11 @@ class ScoutTick(Model):
     day: int = Field(default=0,ge=0,le=61)
 
 
+class FieldSend(Model):
+    text: str = Field(min_length=1,max_length=500)
+    anonymous: Literal[False] = False
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
                data_source: str | None = None, web_dist: Path | None = None,
@@ -91,18 +101,21 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     source = data_source or os.environ.get('PEATFORGE_DATA_SOURCE', '').strip() or 'live'
     if source not in ('live', 'fixture'):
         raise ValueError('PEATFORGE_DATA_SOURCE must be live or fixture')
-    # Auth and channels do not select environmental inputs. No network at construction.
-    injected_engine=engine is not None
-    engine = engine if engine is not None else EngineService(Ingest() if source == 'fixture' else None,
-                state_path=RUNTIME_DIR.parent/'engine'/('demo-adaptive.json' if public_demo else 'protected-adaptive.json'))
-    source = engine.ingest.mode
-    background_enabled=(not injected_engine and db_path is None and source=='live') if background_scout is None else background_scout
     default_path = RUNTIME_DIR / ('demo.sqlite3' if public_demo else 'state.sqlite3')
     configured_path = os.environ.get('PEATFORGE_DB_PATH', '').strip()
     path = Path(db_path if db_path is not None else configured_path or default_path).resolve()
     forbidden_path = (RUNTIME_DIR / ('state.sqlite3' if public_demo else 'demo.sqlite3')).resolve()
     if path == forbidden_path:
         raise ValueError('Database path crosses the public/protected boundary')
+    # Explicit temporary DB injection must never read/mutate real demo adaptation.
+    # Custom runtime DBs carry their own state sidecar; standard scopes stay separate.
+    state_path=(None if db_path is not None else
+                RUNTIME_DIR.parent/'engine'/('demo-adaptive.json' if public_demo else 'protected-adaptive.json')
+                if path==default_path.resolve() else path.with_suffix('.adaptive.json'))
+    injected_engine=engine is not None
+    engine = engine if engine is not None else EngineService(Ingest() if source == 'fixture' else None,state_path=state_path)
+    source = engine.ingest.mode
+    background_enabled=(not injected_engine and db_path is None and path==default_path.resolve() and source=='live') if background_scout is None else background_scout
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -122,6 +135,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.engine = engine
         app.state.tools = ToolService(database, mock=public_demo, engine=engine)
         app.state.channels = ChannelAdapter(database, ChannelSettings.from_environment(public_demo=public_demo))
+        app.state.config['outbound']='mock' if app.state.channels.settings.force_mock else 'configured_only'
         app.state.tools.channels = app.state.channels
         app.state.warden = Warden(database, app.state.tools, app.state.channels)
         app.state.channels.on_inbound = app.state.warden.handle
@@ -130,6 +144,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.warden.after_confirm = app.state.planner.process
         app.state.scout=Scout(database,app.state.tools,app.state.channels,app.state.warden)
         app.state.warden.on_call=app.state.scout.place_call
+        app.state.field=FieldService(database,app.state.channels)
         app.state.brain = OfflineBrain()
         async def run_scout():
             while True:
@@ -150,10 +165,12 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                     await task
 
     app = FastAPI(title='Peatforge', lifespan=lifespan)
+    app.add_middleware(SecurityHeaders)
+    app.state.auth=OperatorAuth(AuthSettings.from_environment(),public_demo)
     app.state.public_demo = public_demo
     app.state.database_path = path
     app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
-                            source=source, engine='deterministic', outbound='mock' if public_demo else 'configured_only',
+                            source=source, engine='deterministic', outbound='mock',
                             poll_ms=4000, field_poll_ms=3000, voice_available=False,scout_background=background_enabled)
 
     @app.exception_handler(RequestValidationError)
@@ -173,9 +190,13 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         return JSONResponse({'error': {'code': 'not_found', 'message': 'Data tidak ditemukan'}}, status_code=404)
 
     @app.exception_handler(HTTPException)
+    @app.exception_handler(StarletteHTTPException)
     async def auth_handler(request, exception):
-        code = {401: 'unauthorized', 403: 'forbidden', 409: 'conflict', 404: 'not_found'}.get(exception.status_code, 'invalid')
-        return JSONResponse({'error': {'code': code, 'message': 'Akses ditolak' if exception.status_code in (401,403) else 'Status tidak mengizinkan perubahan'}}, status_code=exception.status_code)
+        if exception.status_code==405 and request.url.path.startswith('/api/field/'):
+            return JSONResponse({'error':{'code':'not_found','message':'Data tidak ditemukan'}},status_code=404)
+        code = {401: 'unauthorized', 403: 'forbidden', 409: 'conflict', 404: 'not_found',429:'rate_limited',503:'unavailable'}.get(exception.status_code, 'invalid')
+        message={401:'Akses ditolak',403:'Akses ditolak',404:'Data tidak ditemukan',429:'Terlalu banyak permintaan',503:'Layanan belum tersedia'}.get(exception.status_code,'Status tidak mengizinkan perubahan')
+        return JSONResponse({'error': {'code': code, 'message': message}}, status_code=exception.status_code)
 
     app.include_router(create_router(service=engine), prefix='/api', dependencies=[Depends(require_operator)])
     operator = APIRouter(prefix='/api', dependencies=[Depends(require_operator)])
@@ -196,6 +217,10 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             if not connection.execute('SELECT 1 FROM responders WHERE id=?', (responder_id,)).fetchone():
                 raise KeyError('Unknown responder')
         return {'items': message_items(app.state.database, responder_id, after)}
+
+    @operator.get('/responders/{responder_id}/field-link')
+    def field_link(responder_id:str):
+        return {'field_path':app.state.field.link(responder_id)}
 
     @operator.post('/demo/inbound')
     def demo_inbound(body: DemoInbound):
@@ -257,6 +282,50 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     def health() -> dict[str, str]:
         return {'status': 'ok'}
 
+    @app.post('/api/auth/login')
+    async def login(request:Request):
+        auth=app.state.auth
+        if not auth.attempts.allow(peer_ip(request)):
+            raise HTTPException(429,'Login rate limit')
+        if public_demo:
+            return {'authenticated':True,'public_demo':True}
+        if not auth.settings.configured():
+            raise HTTPException(503,'Authentication unavailable')
+        raw=bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw)>1024:
+                raise HTTPException(401,'Invalid login')
+        try:
+            body=json.loads(raw)
+        except (ValueError,TypeError,RecursionError):
+            raise HTTPException(401,'Invalid login') from None
+        if not isinstance(body,dict) or set(body)!={'pin'} or not auth.check_pin(body['pin']):
+            raise HTTPException(401,'Invalid login')
+        response=JSONResponse({'authenticated':True,'public_demo':False})
+        response.set_cookie(COOKIE_NAME,auth.issue(),max_age=SESSION_SECONDS,
+                            expires=datetime.fromtimestamp(auth.clock()+SESSION_SECONDS,timezone.utc),
+                            httponly=True,secure=secure_cookie(request),samesite='strict',path='/')
+        return response
+
+    @app.post('/api/auth/logout')
+    def logout(request:Request):
+        response=JSONResponse({'authenticated':False,'public_demo':public_demo})
+        response.delete_cookie(COOKIE_NAME,path='/',httponly=True,secure=secure_cookie(request),samesite='strict')
+        return response
+
+    @app.get('/api/auth/session')
+    def session(request:Request):
+        return {'authenticated':app.state.auth.authenticated(request),'public_demo':public_demo}
+
+    @app.get('/api/field/{token}/messages')
+    def field_messages(token:str,after:str|None=Query(None,max_length=40)):
+        return app.state.field.messages(token,after)
+
+    @app.post('/api/field/{token}/send')
+    def field_send(token:str,body:FieldSend):
+        return app.state.field.send(token,body.text)
+
     @app.post('/api/channels/sms/inbound')
     async def sms_inbound(request: Request):
         # Strip the credential query before server access logging sees the scope.
@@ -274,7 +343,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             event = json.loads(raw)
             if not isinstance(event, dict):
                 raise ValueError('Invalid event')
-            return channels.sms_inbound(event)
+            return await asyncio.to_thread(channels.sms_inbound,event)
         except (ValueError, TypeError, RecursionError):
             return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
 

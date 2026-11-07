@@ -107,7 +107,7 @@ in-process locks serialize duplicate callback handling.
 
 `GET /api/config`, `/api/responders`, `/api/responders/{id}/messages` and engine
 routes share an operator dependency. Public demo opens them; protected operation
-fails closed with 401 until PIN support is implemented. Contact ciphertext, hashes,
+requires a configured PIN session and otherwise fails closed with 401. Contact ciphertext, hashes,
 tokens, full phone numbers and provider credentials are never selected for responses.
 Five synthetic responders correspond to the pilot villages, without real contacts.
 The minimal `/api/events/risk-changed` route is a manual MOCK alert trigger. It uses
@@ -136,8 +136,8 @@ items expire after six hours; newer same-village/type proposals supersede propos
 predecessors. Approval changes status to approved and atomically stores exactly one
 mock follow-up for the original responder. It never marks field execution. Exact,
 no-days and lower-bound variants preserve tool facts. Rejection and optional manual
-completion are persisted. Protected approval delivery is unavailable until auth and
-an approved real delivery flow exist.
+completion are persisted. Protected mock approval is available behind auth. Real
+approval delivery remains unavailable until an approved provider delivery flow exists.
 
 Routes: GET `/api/actions?village_id=&include_old=false` -> items/hidden_count;
 POST `/api/actions/{id}/approve` with `{}`; reject with `{reason}`; complete with
@@ -155,3 +155,38 @@ Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.
 The cache integration check disables network, uses existing actual provider data and
 temporary agent state, and verifies the current Talio replay day9 scenario returns
 one modelled day of delay. It skips explicitly if the provider cache is absent.
+
+## B8 auth and scoped field links
+
+Public demo stays open by default. Protected mode requires six ASCII digits in
+DEMO_PIN and at least 32 characters in SESSION_SECRET; missing configuration fails
+closed. There is no generated, printed or fallback PIN. POST `/api/auth/login`
+accepts `{pin}`, POST logout clears the cookie, and GET session reports authenticated
+and public_demo. HMAC-signed sessions last 12 hours, use HttpOnly/SameSite Strict,
+and are Secure for HTTPS or public tunnel hosts. Login permits five attempts per
+minute per socket peer; CF/X-Forwarded headers are not trusted. Run Uvicorn with
+`--no-proxy-headers --no-access-log` so upstream defaults do not rewrite that peer.
+
+The shared operator dependency protects engine, config, responders, observations,
+actions, trace, policy and Scout. Authorized GET `/api/responders/{id}/field-link`
+returns one stable `/f/` capability from token_urlsafe(32). No other DTO selects it.
+GET `/api/field/{token}/messages` returns own messages, responder name/village and
+Warden state/context. POST send accepts `{text}` up to 500 characters and forces
+the token's responder through the same Warden pipeline; identity/context overrides
+are rejected. Known tokens permit 30 sends/minute. Unknown tokens are 404, and a
+field token never authenticates operator routes. Unimplemented field tools/voice
+are unavailable; anonymity is not promised.
+
+API and field responses use no-store/no-referrer. CSP permits self module workers,
+Esri/OSM tiles, Google fonts and inline MapLibre styles. Sensitive field paths and
+query strings are redacted in ASGI scope before response access logging. External
+proxy access logs must also stay disabled or redact credentials.
+
+PEATFORGE_LIVE_CHANNELS defaults false; credentials alone do not activate providers.
+Public demo always forces mock channels. Protected mode remains mock until that
+flag is explicitly true, after which missing provider/contact settings fail closed.
+Scout stays mock-only independently. Explicit temporary db_path injection uses
+in-memory engine adaptation; a custom environment DB path gets its own adaptive
+sidecar instead of touching standard demo/protected runtime state.
+
+Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels agents.test_warden agents.test_planner agents.test_scout agents.test_auth -q`.

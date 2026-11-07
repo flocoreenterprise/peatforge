@@ -22,7 +22,7 @@ class ChannelTests(unittest.TestCase):
         self.db = Database(Path(self.temp.name) / 'channels.sqlite3')
         self.db.initialize()
         seed_mock(self.db)
-        self.settings = ChannelSettings(public_demo=False, gateway_url='https://gateway.test/3rdparty/v1',
+        self.settings = ChannelSettings(public_demo=False,force_mock=False, gateway_url='https://gateway.test/3rdparty/v1',
             gateway_user='user', gateway_pass='password', webhook_secret='s' * 32,
             encryption_key=Fernet.generate_key().decode(), phone_salt='h' * 32)
 

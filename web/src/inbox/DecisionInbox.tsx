@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type Config } from '../api';
 import './inbox.css';
+import { validFieldPath } from './fieldLink';
 
 export type InboxProps = { villageId?: string; mode: 'live' | 'replay'; day: number };
 type Action = { id: string; village_id: string; title: string; reason: string; kind: string; status: string; mode: string; day: number; responder_id: string; anonymous: boolean; days_bought: number | null; at_least_days: number | null; simulation_reason?: string; benefit: { wt_gain_cm: number | null; pfvi_reduction: number | null }; verifier: { decision: string; checks: { name: string; passed: boolean | null; reason?: string }[] }; assumptions?: string[] };
@@ -56,6 +57,7 @@ export function SmsLoop({ villageId, mode, day }: InboxProps) {
   }
   const enabled = config?.public_demo === true && !!selected;
   return <section className="pf-inbox pf-sms" aria-label="Simulator SMS operator"><header><span className="pf-inbox-kicker">KANAL SIMULASI</span><h3>Alur SMS lapangan</h3><p>Simulasi operator · tidak mengirim SMS nyata. AIR 61 adalah contoh laporan demo yang diketik operator.</p></header><label>Responden<select value={selected} onChange={e => setSelected(e.target.value)}>{responders.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>{!responders.length && <p>Responden belum tersedia.</p>}
+    <FieldShare key={selected} responderId={selected} />
     <button className="pf-inbox-alert" disabled={!enabled || busy} onClick={() => void send(true)}>1. Picu peringatan model</button>{notice && <p role="status">{notice}</p>}
     {error && <p className="pf-inbox-error" role="alert">{error}</p>}{config && !config.public_demo && <p>Simulator tersedia hanya dalam demo terbuka.</p>}
     {progress && <><ol className="pf-inbox-steps">{progress.steps.map(step => <li key={step.id} className={step.done ? 'pf-inbox-stepdone' : ''}><span>{step.done ? '✓' : '○'}</span>{step.label}</li>)}</ol><p className="pf-inbox-muted">Status tersimpan: {progress.state} · {progress.mode} / hari {progress.day}</p>{(progress.mode !== mode || (mode === 'replay' && progress.day !== day)) && <p>Progres berasal dari konteks sebelumnya. Picu peringatan untuk konteks saat ini.</p>}</>}
@@ -66,3 +68,25 @@ export function SmsLoop({ villageId, mode, day }: InboxProps) {
 
 
 
+
+function FieldShare({ responderId }: { responderId: string }) {
+  const [path, setPath] = useState(''), [busy, setBusy] = useState(false), [status, setStatus] = useState('');
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function load() {
+    setBusy(true); setStatus(''); setPath('');
+    try {
+      const result = await api<{ field_path: unknown }>(`/responders/${encodeURIComponent(responderId)}/field-link`);
+      if (!mounted.current) return;
+      if (!validFieldPath(result.field_path)) { setStatus('Link responder belum tersedia.'); return; }
+      setPath(result.field_path);
+    } catch { if (mounted.current) setStatus('Link responder belum tersedia.'); }
+    finally { if (mounted.current) setBusy(false); }
+  }
+  async function copy() {
+    if (!validFieldPath(path)) return;
+    try { await navigator.clipboard.writeText(window.location.origin + path); if (mounted.current) setStatus('Link responder disalin.'); }
+    catch { if (mounted.current) setStatus('Link belum dapat disalin. Gunakan tombol buka halaman responder.'); }
+  }
+  return <div><div className="pf-inbox-buttons"><button type="button" disabled={!responderId || busy} onClick={() => void load()}>{busy ? 'Memuat link…' : 'Bagikan link responder'}</button>{validFieldPath(path) && <><a href={path} target="_blank" rel="noreferrer" referrerPolicy="no-referrer">Buka halaman responder</a><button type="button" onClick={() => void copy()}>Salin link</button></>}</div>{status && <p role="status" className="pf-inbox-muted">{status}</p>}</div>;
+}

@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import vm from 'node:vm';
+const source = readFileSync(new URL('./fieldLink.ts', import.meta.url), 'utf8');
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const context = { exports: {} };
+vm.runInNewContext(compiled, context);
+const valid = context.exports.validFieldPath;
+const token = 'a'.repeat(43);
+assert.equal(valid('/f/' + token), true);
+for (const value of [undefined, null, {}, 1, '/f/' + 'a'.repeat(42), '/f/' + 'a'.repeat(44), 'https://example.invalid/f/' + token, '//example.invalid/f/' + token, '/f/' + token + '?x=1', '/f/' + token + '\n', '/f/' + '%'.repeat(43), 'javascript:alert(1)']) assert.equal(valid(value), false);
+console.log('PASS: field-link validation (13 assertions); synthetic input only');

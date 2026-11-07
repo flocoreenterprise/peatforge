@@ -9,6 +9,7 @@ function Test-SettingShape {
     if ($Value -match "[\r\n\x00']" -or $Value.Length -gt 4096) { return $false }
     switch ($SettingName) {
         'PUBLIC_DEMO' { return $Value -cmatch '^(true|false)$' }
+        'PEATFORGE_LIVE_CHANNELS' { return $Value -cmatch '^(true|false)$' }
         'PEATFORGE_ENGINE_MODE' { return $Value -cmatch '^(mock|real)$' }
         'PEATFORGE_DATA_SOURCE' { return $Value -cmatch '^(live|fixture)$' }
         'DEMO_PIN' { return $Value -cmatch '^\d{6}$' }
@@ -16,6 +17,7 @@ function Test-SettingShape {
         'TWILIO_ACCOUNT_SID' { return $Value -cmatch '^AC[0-9a-fA-F]{32}$' }
         'TWILIO_AUTH_TOKEN' { return $Value -match '^[0-9a-fA-F]{32}$' }
         'TWILIO_FROM_NUMBER' { return $Value -match '^\+[1-9]\d{7,14}$' }
+        'UAT_PHONE_NUMBER' { return $Value -match '^\+[1-9]\d{7,14}$' }
         'VOICE_ENGINE' { return $Value -cmatch '^(auto|twiml|realtime)$' }
         'OPENAI_REALTIME_MODEL' { return $Value -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$' }
         'OPENAI_REALTIME_VOICE' { return $Value -match '^[A-Za-z][A-Za-z0-9_-]{0,63}$' }
@@ -37,6 +39,21 @@ function Test-SettingShape {
         { $_ -in @('SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY') } { return $Value.Length -ge 32 }
         default { return -not [string]::IsNullOrWhiteSpace($Value) }
     }
+}
+
+function New-SettingSecret {
+    param([string]$SettingName)
+    if ($SettingName -notin @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
+        throw 'Konfigurasi ini tidak mendukung !generate.'
+    }
+    $bytes = [byte[]]::new(32)
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) }
+    finally { $rng.Dispose() }
+    $generated = [Convert]::ToBase64String($bytes).Replace('+','-').Replace('/','_')
+    [Array]::Clear($bytes, 0, $bytes.Length)
+    if ($SettingName -ne 'CONTACT_ENCRYPTION_KEY') { $generated = $generated.TrimEnd('=') }
+    return $generated
 }
 
 function Update-EnvSettings {
@@ -72,7 +89,8 @@ function Invoke-SecretSetup {
     try {
         foreach ($setting in ($SelectedNames | Select-Object -Unique)) {
             do {
-                $secure = Read-Host -Prompt ($setting + ' (kosong=lewati, !clear=hapus; ulang jika format salah)') -AsSecureString
+                $hint = if ($setting -in @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) { ', !generate=buat lokal' } else { '' }
+                $secure = Read-Host -Prompt ($setting + ' (kosong=lewati, !clear=hapus' + $hint + '; ulang jika format salah)') -AsSecureString
                 $pointer = [IntPtr]::Zero
                 $value = $null
                 try {
@@ -85,6 +103,9 @@ function Invoke-SecretSetup {
                 }
                 if ($value.Length -eq 0) { break }
                 if ($value -ceq '!clear') { $updates[$setting] = ''; break }
+                if ($value -ceq '!generate' -and $setting -in @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
+                    $value = New-SettingSecret -SettingName $setting
+                }
                 if (Test-SettingShape -SettingName $setting -Value $value) { $updates[$setting] = $value; break }
                 $value = $null
             } while ($true)

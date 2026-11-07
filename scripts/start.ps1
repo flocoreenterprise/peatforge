@@ -25,7 +25,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Web build failed.' }
         } finally { Pop-Location }
     }
-    $serverArguments = @('-m','uvicorn','agents.app:app','--host','127.0.0.1','--port',"$Port",'--no-access-log')
+    $serverArguments = @('-m','uvicorn','agents.app:app','--host','127.0.0.1','--port',"$Port",'--no-access-log','--no-proxy-headers')
     if (Test-Path -LiteralPath '.env') { $serverArguments += @('--env-file', (Join-Path $repoRoot '.env')) }
     & .\.venv\Scripts\python.exe @serverArguments
     if ($LASTEXITCODE -ne 0) { throw 'Server exited with an error.' }

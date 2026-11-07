@@ -5,7 +5,8 @@ import './village.css';
 type Point = { date: string; wt_cm: number; pfvi: number };
 type Status = { level: string; pfvi: number | null; wt_cm: number | null; days_to_critical: number | null; confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[] };
 type Simulation = { days_bought: number | null; at_least_days: number | null; reason: string | null; wt_gain_cm: number; pfvi_reduction: number; baseline_critical_date: string | null; scenario_critical_date: string | null; curve_baseline: Point[]; curve_scenario: Point[]; assumptions: string[] };
-type Bundle = { status: Status; simulation: Simulation; canals: { id: string; name: string; source: string }[]; resources: { pumps: number; crews: number }; history: { version: number; created_at: string; params: { provenance?: string } }[] };
+type History = { version: number; created_at: string; observation_id?: string | null; params: { provenance?: string; initial_wt_cm?: number }; old?: Status; new?: Status; observed_wt_cm?: number; applied_initial_wt_delta_cm?: number };
+type Bundle = { status: Status; simulation: Simulation; canals: { id: string; name: string; source: string }[]; resources: { pumps: number; crews: number }; history: History[] };
 const number = (n: number | null) => n === null ? 'belum tersedia' : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(n);
 
 export function benefitText(s: Simulation): string {
@@ -86,7 +87,16 @@ export default function VillageDetail({ villageId, mode, day }: { villageId: str
       <h3>Kanal dan sumber daya · fixture</h3><p>{data.canals.find(c => c.id === 'K4')?.name ?? 'K4'} · {data.resources.pumps} pompa · {data.resources.crews} regu. Lokasi dan kesiapan belum diverifikasi.</p>
       <h3>Sumber dan asumsi</h3><p>Sumber hasil: {s.source} · {s.stale ? 'cache kedaluwarsa' : 'tidak ditandai kedaluwarsa'} · data_as_of: {s.data_as_of}</p>
       <ul>{Array.from(new Set([...s.assumptions, ...sim.assumptions])).map(note => <li key={note}>{note}</li>)}</ul>
-      <h3>Riwayat parameter</h3>{data.history.map(h => <p key={`${h.version}-${h.created_at}`}>Versi {h.version} · {h.created_at}<br />{h.params.provenance}</p>)}
+      <h3>Riwayat parameter</h3>
+      {mode === 'replay' && <p>Riwayat pembaruan live; replay tidak diubah.</p>}
+      {data.history.map(h => <div key={`${h.version}-${h.created_at}`}>
+        <p>Versi {h.version} · {h.created_at}<br />{h.params.provenance}</p>
+        {h.old && h.new && <>
+          <p>Koreksi terbatas kondisi awal dari laporan terkonfirmasi; bukan kalibrasi K/Sy dan belum tervalidasi di lapangan.</p>
+          <p>Air tanah dilaporkan: {h.observed_wt_cm === undefined ? 'belum tersedia' : `${number(h.observed_wt_cm)} cm`}. Koreksi kondisi awal diterapkan: {h.applied_initial_wt_delta_cm === undefined ? 'belum tersedia' : `${number(h.applied_initial_wt_delta_cm)} cm`}{h.params.initial_wt_cm === undefined ? '.' : `; kondisi awal menjadi ${number(h.params.initial_wt_cm)} cm.`}</p>
+          <p>Model sebelum → sesudah: air tanah {number(h.old.wt_cm)} → {number(h.new.wt_cm)} cm; PFVI {number(h.old.pfvi)} → {number(h.new.pfvi)}; keyakinan heuristik {number(h.old.confidence)} → {number(h.new.confidence)}.</p>
+        </>}
+      </div>)}
     </details>
     <details className="village-glossary"><summary>Arti istilah</summary><dl><dt>PFVI</dt><dd>Indeks kerentanan kebakaran gambut dari model, antara 0 dan 300.</dd><dt>Kalibrasi</dt><dd>Penyesuaian parameter dengan data pembanding. Model ini belum dikalibrasi independen di lapangan.</dd><dt>Sekat kanal</dt><dd>Penghalang aliran kanal untuk menahan air; manfaat di sini hanya simulasi.</dd><dt>Otonomi</dt><dd>Tingkat kewenangan sistem. Tindakan lapangan membutuhkan persetujuan manusia.</dd></dl></details>
   </section>;

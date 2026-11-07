@@ -19,6 +19,7 @@ FIXTURE_SENDER = '+620000000001'  # Deliberately synthetic; never sent to a prov
 @dataclass(repr=False)
 class ChannelSettings:
     public_demo: bool = True
+    force_mock: bool = True
     gateway_url: str = ''
     gateway_user: str = field(default='', repr=False)
     gateway_pass: str = field(default='', repr=False)
@@ -29,7 +30,10 @@ class ChannelSettings:
 
     @classmethod
     def from_environment(cls, *, public_demo: bool) -> 'ChannelSettings':
-        return cls(public_demo=public_demo, **{name: os.environ.get(env, '') for name, env in {
+        live=os.environ.get('PEATFORGE_LIVE_CHANNELS','').strip().lower()
+        if live not in ('','true','false'):
+            raise ValueError('PEATFORGE_LIVE_CHANNELS must be true or false')
+        return cls(public_demo=public_demo,force_mock=public_demo or live!='true', **{name: os.environ.get(env, '') for name, env in {
             'gateway_url': 'SMS_GATEWAY_URL', 'gateway_user': 'SMS_GATEWAY_USER', 'gateway_pass': 'SMS_GATEWAY_PASS',
             'webhook_secret': 'SMS_WEBHOOK_SECRET', 'signing_key': 'SMS_SIGNING_KEY',
             'encryption_key': 'CONTACT_ENCRYPTION_KEY', 'phone_salt': 'PHONE_HASH_SALT'}.items()})
@@ -77,7 +81,7 @@ class Gateway:
     def _base(self) -> str:
         url = self.settings.gateway_url.rstrip('/')
         parts = urlsplit(url)
-        if (self.settings.public_demo or parts.scheme not in ('http', 'https') or not parts.hostname
+        if (self.settings.public_demo or self.settings.force_mock or parts.scheme not in ('http', 'https') or not parts.hostname
                 or parts.username or parts.password or parts.query or parts.fragment
                 or not self.settings.gateway_user or not self.settings.gateway_pass):
             raise ChannelUnavailable('SMS provider unavailable')
@@ -139,7 +143,7 @@ class ChannelAdapter:
                         raise ValueError('Message receipt scope mismatch')
                     return {'message_id':idempotency_key,'status':existing['status']}
         message_id = idempotency_key or identifier('m')
-        status = 'mock' if mock_only or self.settings.public_demo or channel == 'web' else 'pending'
+        status = 'mock' if mock_only or self.settings.force_mock or self.settings.public_demo or channel == 'web' else 'pending'
         with self.db.connect() as connection:
             connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
                 (message_id, responder_id, 'outbound', channel, text, speech, status, trace_id, utc_now()))

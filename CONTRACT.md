@@ -253,3 +253,7 @@ No live external communication during build until provider setup and the chosen 
 - Parameter history includes before/after and triggering observation. Engine state is separate per public/protected scope, in-memory bydefault in tests.
 - B8 activates existing planned operator auth and scoped field routes. No random/printed fallbackPIN. Missingsecrets failclosed. Publicdemo remainsdefault.
 - C5 trace enabled bylatestuser. C7limitedprovincecounts mayuse attributed public administrative polygons; no nationalrisk/A7classificationclaims.
+
+B8 delivery configuration: PEATFORGE_LIVE_CHANNELS=true is an explicit separate opt-in; defaultfalse keeps channels mocked even in protectedmode. Publicdemo alwaysmock. UAT_PHONE_NUMBER is a masked E.164 chosen testrecipient, entered only throughset-secrets.ps1. LocalSESSION_SECRET/contactencryption/hash/webhook secrets may be created by entering !generate inside thatscript; never printed. PIN always userchosen, nofallback.
+Latest Scout cap is hardonecall/responder/WIBday INCLUDINGEKSTREM; EKSTREM bypassesquiet hours only, neverdailycap/cooldown.
+Uvicorn starts with --no-proxy-headers so request.client remains the socketpeer and spoofed forwardingheaders cannot bypassratelimits.

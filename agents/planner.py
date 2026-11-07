@@ -164,7 +164,7 @@ class Planner:
                 'hidden_count': 0 if include_old else len(hidden)}
 
     def transition(self, action_id: str, operation: str, note: str = '') -> dict:
-        if not self.channels.settings.public_demo:
+        if not (self.channels.settings.public_demo or self.channels.settings.force_mock):
             raise ChannelUnavailable('Approval delivery is mock-only until protected operation is implemented')
         with self._lock, self.db.connect() as connection:
             connection.execute('BEGIN IMMEDIATE')

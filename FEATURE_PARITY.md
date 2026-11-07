@@ -16,3 +16,5 @@ No reference screenshots supplied; no claim of visual parity with an older app.
 
 Root fullsuite96tests +15subtestsPASS. RealcachedTalio replay9 +60cm scenario gives1day; nohardcodedbenefit.
 All five villages use BMKG adm4 metadata; canals/resources/responders remain fixtures.
+
+Extension block: B4 Scout/autonomy, A6 bounded initial-condition assimilation, C5 actual traces, C7 light provincial counts, and B8 PIN/scoped field links implemented. Root133tests +33subtests PASS; extension cloudQA scheduled12:15. Earlier cut/status rows are superseded by this entry.

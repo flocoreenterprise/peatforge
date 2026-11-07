@@ -16,3 +16,5 @@
 .selected-village-heading{font-family:Manrope,sans-serif;margin:22px 0 12px;font-size:23px;letter-spacing:-.6px}.village-list{display:grid;grid-template-columns:1fr 1fr;gap:4px}.village-row{padding:8px 5px;min-height:60px}.village-icon{display:none}.village-row strong{font-size:12px}.village-row>div span{font-size:12px}.village-row>svg{width:12px;flex-shrink:0}.village-row>div{min-width:0}.village-row.selected{outline:1px solid var(--line)}
 
 @media(max-width:767px){.replay-control{top:75px}.has-banner .replay-control{top:135px}.basemap-button{bottom:calc(51% + 82px)}.maplibregl-ctrl-bottom-right{max-width:calc(100% - 92px)!important;right:70px!important}}
+
+.national-shell{height:100%;overflow:auto;padding:32px;max-width:1100px;margin:auto}.scope-switch{font-size:12px;white-space:nowrap}@media(max-width:767px){.national-shell{padding:20px}.topbar .scope-switch{width:auto;font-size:12px;padding:0 8px}}

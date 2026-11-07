@@ -15,7 +15,8 @@ Open http://127.0.0.1:8000. In a second terminal, `& .\scripts\start-tunnel.ps1`
 The same FastAPI server serves the React build and API. Keep server/tunnel running during the demo.
 No credentials are required for the current open operator demo. Do not run the secrets script just to start it.
 If credentials are needed later, use only `scripts/set-secrets.ps1`; never paste secrets into chat or Git.
-Protected mode currently fails closed; PIN login and real SMS/phone setup are deferred by user instruction.
+Protected mode now requires the configured PIN and session secret. Public demo remains the default.
+Real SMS/phone delivery requires a separate explicit flag and recipient setup; it has not been tested live.
 
 ## Demo
 
@@ -36,8 +37,10 @@ fire-prevention outcome. Other dates legitimately return zero, unavailable exact
 - BMKG points are reference coordinates, not official boundaries. Canals/resources/responders are labelled fixtures.
 - NASA hotspots are satellite heat detections, not confirmed fires. Unavailable archive hotspots remain unavailable.
 - Open demo storage is isolated from real contacts; every external delivery is mocked. No real SMS/call was sent.
-- A6 adaptation, A7 hotspot QA, national view,3D,Telegram,Realtime,trace drawer and ask bar are cut.
-- Before real SMS activation, offload synchronous webhook processing to preserve prompt acknowledgements.
+- Scout enforces quiet hours and a hard one-call-per-day limit. Confirmed live WT can update a bounded initial condition; replay remains unchanged.
+- Proposal traces and national heat counts are available. Province boundaries are the labelled 2017/34-province set.
+- A7 hotspot QA,3D,Telegram,Realtime and ask bar remain cut.
+- SMS processing is offloaded from the async server loop. Live provider delivery still needs the scheduled UAT.
 
 ## Validation
 
@@ -48,7 +51,7 @@ npm.cmd run build
 node src/inbox/benefit.test.mjs
 ```
 
-Latest root suite:96passed +15subtests, webbuild PASS, formatter7assertions PASS.
+Latest root suite:133 passed +33 subtests; web build PASS; benefit7 and field-link13 assertions PASS.
 Manual cloud test passed the complete mocked SMS loop including1day proposal and one follow-up.
 Security found noP0/P1 within public-demo scope. Scheduled audits and final screenshots remain separate checks.
 Read AGENTS.md and CONTRACT.md before edits; contract includes planned routes, while OpenAPI lists implemented routes.
