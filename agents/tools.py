@@ -32,6 +32,7 @@ class ToolService:
     def __init__(self, database: Database, *, mock: bool = True, engine: Engine | None = None):
         self.db = database
         self.mock = mock
+        self.channels = None
         self.engine = engine if engine is not None else engine_backend(mock)
 
     def get_village_status(self, village_id: str, mode: Mode = 'live', day: int = 0) -> Status:
@@ -91,6 +92,8 @@ class ToolService:
                     recalibrated=False, reason='replay_skips_recalibration' if observation.mode == 'replay' else 'B1_storage_only')
 
     def notify(self, responder_id: str, text: str, channel: Channel = 'sms', trace_id: str | None = None) -> dict[str, str]:
+        if self.channels is not None:
+            return self.channels.send(responder_id, text, channel, trace_id=trace_id)
         if not self.mock:
             raise RuntimeError('Channel adapter is not configured')
         if channel not in ('sms', 'voice', 'telegram', 'web') or not text.strip() or len(text) > 300:

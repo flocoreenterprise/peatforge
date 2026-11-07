@@ -45,3 +45,39 @@ landmark resolution, confirmed observation storage and mock notification. Observ
 storage retains the model snapshot; recalibration and the verification pipeline arrive
 in B3/B5. `OfflineBrain` is default; `safe_rewrite` only accepts wording preserving
 numeric tokens and URLs within the message limit. No OpenAI calls are implemented.
+
+## B2 channels
+
+`ChannelAdapter.send` supports SMS and web; both use the same message store.
+`inbound(Inbound(...))` is the common entry point for future field/Warden handling.
+Inbound SMS is stored with `status=received` for the next pipeline block, deduplicated
+by gateway message ID. Unknown senders are acknowledged without creating contacts.
+Telegram is deferred. Real sends require a consented encrypted contact and configured
+gateway; provider failures produce failed messages, never mock success.
+
+`POST /api/channels/sms/inbound?key=...` requires `SMS_WEBHOOK_SECRET` (at least 32
+characters), including in public demo. Configured `SMS_SIGNING_KEY` additionally
+requires HMAC-SHA256(raw body + X-Timestamp), within five minutes. Query credentials
+are removed from request scope before server access logging. Reverse proxies must
+also omit query strings from their access logs. Request bodies and provider responses
+are never logged or returned. Public demo accepts only synthetic sender
+`+620000000001` into fixture responder `r1`; other senders are ignored and all outbound
+messages remain mock even when gateway credentials exist.
+
+CLI from root: `.venv/Scripts/python.exe -m agents.cli check`, `send <responder> <text>`,
+`bind <responder> --consent` (phone entered through a hidden prompt), or
+`register-webhook <HTTPS-callback-without-query>`. Real CLI actions require
+`PUBLIC_DEMO=false`; `check` in public demo reports mock without accessing a provider.
+Credentials are read only from the process environment; no `.env` loading occurs.
+Fernet contact encryption requires `CONTACT_ENCRYPTION_KEY`; phone lookup uses
+HMAC-SHA256 with `PHONE_HASH_SALT`. Contacts expose last four digits only to callers
+that deliberately query that safe field; no HTTP contact endpoints exist yet.
+
+`SMS_GATEWAY_URL` includes `/3rdparty/v1` for cloud mode, or a local origin for local
+mode. Sending uses cloud `/messages` or local `/message`, Basic auth, and the provider
+textMessage/phoneNumbers shape. Registration uses `/webhooks`; `check` uses `/health`.
+Provider API reference: https://docs.sms-gate.app/features/webhooks/ and
+https://api.sms-gate.app/docs/index.html . No provider action has been tested live.
+
+Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels -v`.
+Tunnel lifecycle scripts remain orchestrator-owned outside this folder.

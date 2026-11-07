@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from .brain import OfflineBrain
+from .channels import ChannelAdapter, ChannelSettings, ChannelUnavailable, verify_webhook
 from .db import Database
 from .tools import ToolService, seed_mock
 
@@ -58,6 +60,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             seed_mock(database)
         app.state.database = database
         app.state.tools = ToolService(database, mock=mock)
+        app.state.channels = ChannelAdapter(database, ChannelSettings.from_environment(public_demo=public_demo))
+        app.state.tools.channels = app.state.channels
         app.state.brain = OfflineBrain()
         yield
 
@@ -70,6 +74,27 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     @app.get('/api/health')
     def health() -> dict[str, str]:
         return {'status': 'ok'}
+
+    @app.post('/api/channels/sms/inbound')
+    async def sms_inbound(request: Request):
+        # Strip the credential query before server access logging sees the scope.
+        key = request.query_params.get('key')
+        request.scope['query_string'] = b''
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > 65536:
+                return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=413)
+        channels = request.app.state.channels
+        if not verify_webhook(channels.settings, key, bytes(raw), request.headers.get('X-Signature'), request.headers.get('X-Timestamp')):
+            return JSONResponse({'error': {'code': 'forbidden', 'message': 'Webhook authentication required'}}, status_code=403)
+        try:
+            event = json.loads(raw)
+            if not isinstance(event, dict):
+                raise ValueError('Invalid event')
+            return channels.sms_inbound(event)
+        except (ValueError, TypeError, RecursionError, ChannelUnavailable):
+            return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
 
     return app
 
