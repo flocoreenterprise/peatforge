@@ -8,6 +8,7 @@ function Protect-TunnelLog {
     param([string]$Line)
     $Line = $Line -replace '/api/field/[A-Za-z0-9_-]{43}', '/api/field/[redacted]'
     $Line = $Line -replace '/f/[A-Za-z0-9_-]{43}', '/f/[redacted]'
+    $Line = $Line -replace '/api/voice/stream/[A-Za-z0-9_.-]+', '/api/voice/stream/[redacted]'
     return ($Line -replace '\?[^\s"]+', '?[redacted]')
 }
 # cloudflared connection errors can contain full callback URLs even when ASGI

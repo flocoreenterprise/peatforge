@@ -4,6 +4,7 @@ import './village.css';
 import { criticalPresentation, type CriticalStatus } from './critical';
 import { scenarioGainText, hydraulicAssumptionText, type ModelSetup } from './scenario';
 import { createSimulationCache, simulationKey } from './simulationCache';
+import { sourceStamp } from '../layout/sourceStamp';
 
 type Point = { date: string; wt_cm: number; pfvi: number };
 type Status = CriticalStatus & { confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[]; simulation_input_version?: string };
@@ -86,6 +87,7 @@ export default function VillageDetail({ villageId, mode, day }: { villageId: str
     <header><span className="village-eyebrow">{mode === 'replay' ? `Putar ulang · hari ${day}` : 'Kondisi desa'} · Indeks rawan api {critical.pfviLevel}</span>{critical.wtCritical && <p className="village-warning" role="status"><strong>Air tanah melewati ambang model sekarang · kedalaman ≥60 cm</strong></p>}<h2>{critical.urgency}</h2><p className="village-benefit">{benefitText(sim)}</p></header>
     <p>Ambang kritis model: air tanah ≥60 cm atau indeks rawan api (PFVI) ≥250. Warna kerawanan memakai indeks saja.</p>
     <p className="village-model">Perkiraan model, belum diukur (modelled)</p>
+    <p><small>{sourceStamp(s, { mode, historicalDate: sim.curve_baseline[0]?.date })}</small></p>
     <p>{scenarioGainText(sim)}</p>
     <div className="village-stats"><div><small>Indeks rawan api · model</small><strong>{s.pfvi == null ? 'Belum ada data' : `${number(s.pfvi)} / 300`}</strong>{s.pfvi == null && <small>Indeks belum tersedia dari model.</small>}</div><div><small>Kedalaman air tanah · model</small><strong>{s.wt_cm == null ? 'Belum ada data' : `${number(s.wt_cm)} cm`}</strong>{s.wt_cm == null && <small>Kedalaman belum tersedia dari model.</small>}</div><div><small>Skor keyakinan model</small><strong>{number(s.confidence)}</strong></div></div>
     {error && <p role="status" className="village-warning">Pembaruan gagal: {error}. Angka terakhir tetap ditampilkan.</p>}
