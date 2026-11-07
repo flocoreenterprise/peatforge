@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from datetime import datetime,timedelta,timezone
 from io import StringIO
 from pathlib import Path
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -266,6 +267,75 @@ class VoiceTests(unittest.TestCase):
             self.assertEqual(voice_main(['check']),0)
         self.assertTrue('configured' in output.getvalue())
         self.assertTrue('6281234567890' not in output.getvalue() and 'b'*32 not in output.getvalue(),'CLI leaked private configuration')
+
+    def test_missing_sms_gateway_is_mock_while_twilio_remains_ready(self):
+        self.app.state.channels.settings.gateway_url=''
+        self.app.state.channels.settings.gateway_user=''
+        self.app.state.channels.settings.gateway_pass=''
+        self.assertFalse(self.app.state.channels.settings.force_mock)
+        self.assertTrue(self.voice.ready())
+        config=self.client.get('/api/config').json()
+        self.assertEqual((config['outbound'],config['voice_mode']),('mock','live'))
+        self.assertEqual(self.app.state.channels.send('r1','Uji coba SMS')['status'],'mock')
+        self.assertEqual(len(self.sms),0)
+
+    def test_cli_uat_pair_is_one_diagnostic_then_normal_and_no_budget_reset(self):
+        first=self.voice.call('r1',diagnostic=True,cli_uat_pair=True)
+        self.assertEqual(first['status'],'queued')
+        self.assertEqual(self.voice.call('r1',uat=True)['status'],'suppressed')
+        self.assertEqual(self.voice.call('r1',uat=True,cli_uat_pair=True)['reason'],'call_cooldown')
+        self.now+=timedelta(seconds=31)
+        second=self.voice.call('r1',uat=True,cli_uat_pair=True)
+        self.assertEqual(second['status'],'queued')
+        self.assertEqual(self.voice.call('r1',uat=True,cli_uat_pair=True)['reason'],'uat_pair_complete')
+        self.now+=timedelta(seconds=31)
+        self.assertEqual(self.voice.call('r1',uat=True)['reason'],'daily_call_limit')
+        self.assertEqual(len(self.requests),2)
+        self.assertEqual(self.app.state.database.get('call-policy:r1')['count'],2)
+
+    def test_uat_pair_requires_chosen_contact_sequence_and_is_not_http_exposed(self):
+        self.assertEqual(self.voice.call('r1',uat=True,cli_uat_pair=True)['reason'],'uat_pair_requires_diagnostic')
+        with self.app.state.database.connect() as connection:
+            connection.execute('INSERT INTO responders(id,village_id,name) VALUES(?,?,?)',('r2',VILLAGE_ID,'Other contact'))
+        self.app.state.channels.contacts().bind('r2','081299999999',consent=True)
+        with self.assertRaises(ChannelUnavailable):
+            self.voice.call('r2',diagnostic=True,cli_uat_pair=True)
+        self.assertEqual(self.client.post('/api/voice/twilio/call',json={'responder_id':'r1','diagnostic':True,'cli_uat_pair':True}).status_code,422)
+        self.assertEqual(len(self.requests),0)
+        self.assertIsNone(self.app.state.database.get('call-policy:r1'))
+
+    def test_concurrent_second_uat_pair_allows_only_one_additional_post(self):
+        self.assertEqual(self.voice.call('r1',diagnostic=True,cli_uat_pair=True)['status'],'queued')
+        self.now+=timedelta(seconds=31)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(lambda unused:self.voice.call('r1',uat=True,cli_uat_pair=True),range(2)))
+        self.assertEqual(sum(item['status']=='queued' for item in results),1)
+        self.assertEqual(len(self.requests),2)
+
+    def test_status_report_is_readonly_chosen_filtered_and_transcript_redacted(self):
+        self.app.state.channels.record_voice('r1','Telepon +6281234567890 lalu buka https://private.test?sid=secret',direction='inbound')
+        reads=[]
+        def response(request):
+            reads.append(request)
+            return httpx.Response(200,json={'calls':[{'sid':self.provider_sid,'to':'+6281234567890','status':'failed','error_code':21215},
+                {'sid':'CA'+'d'*32,'to':'+6289999999999','status':'completed'}]})
+        self.voice.transport=httpx.MockTransport(response)
+        report=self.voice.status_report('r1')
+        self.assertEqual(len(report['calls']),1)
+        self.assertEqual(report['calls'][0],{'call_sid':self.provider_sid,'status':'failed','error_code':21215})
+        self.assertEqual(reads[0].method,'GET')
+        self.assertEqual(reads[0].url.params['To'],'+6281234567890')
+        printed=json.dumps(report)
+        self.assertTrue('6281234567890' not in printed and 'private.test' not in printed and 'sid=secret' not in printed)
+        self.assertIsNone(self.app.state.database.get('call-policy:r1'))
+
+    def test_failed_call_retains_only_safe_provider_error_code(self):
+        self.voice.transport=httpx.MockTransport(lambda request:httpx.Response(400,json={'code':21215,'message':'private provider details','more_info':'https://private.test'}))
+        self.assertEqual(self.voice.call('r1',uat=True)['status'],'failed')
+        with self.app.state.database.connect() as connection:
+            saved=[json.loads(row['value']) for row in connection.execute("SELECT value FROM kv WHERE key LIKE 'voice-session:%'")]
+        self.assertEqual(saved[0]['error_code'],21215)
+        self.assertTrue('private provider details' not in json.dumps(saved))
 
 
 if __name__=='__main__':

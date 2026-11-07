@@ -181,7 +181,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.engine = engine
         app.state.tools = ToolService(database, mock=public_demo, engine=engine)
         app.state.channels = ChannelAdapter(database, ChannelSettings.from_environment(public_demo=public_demo))
-        app.state.config['outbound']='mock' if app.state.channels.settings.force_mock else 'configured_only'
+        app.state.config['outbound']='mock' if app.state.channels.settings.sms_mock else 'configured_only'
         app.state.tools.channels = app.state.channels
         app.state.warden = Warden(database, app.state.tools, app.state.channels)
         app.state.channels.on_inbound = app.state.warden.handle
@@ -255,7 +255,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
 
     @operator.get('/config')
     def config():
-        return {**app.state.config,'outbound':'mock' if app.state.channels.settings.force_mock or public_demo else 'configured_only',
+        return {**app.state.config,'outbound':'mock' if app.state.channels.settings.sms_mock else 'configured_only',
                 'voice_available':app.state.voice.ready(),'voice_mode':app.state.voice.mode()}
 
     @operator.get('/responders')

@@ -5,6 +5,7 @@ from datetime import datetime,timezone
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -18,7 +19,7 @@ from .channels import ChannelAdapter,ChannelUnavailable,Inbound
 from .contacts import normalize_phone
 from .db import Database,identifier
 from .events import record
-from .scout import reserve_call
+from .scout import reserve_call,decision,WIB
 from .tools import ToolService
 from .warden import Warden,parse_report
 
@@ -28,6 +29,59 @@ SID_TTL=15*60
 # MAC key = configured TWILIO_AUTH_TOKEN; message = "twilio-session:" + first five fields.
 # Valid for 15 minutes (+30s clock skew). Never print/store in trace or return in operator JSON.
 BYE=re.compile(r'\b(matiin|matikan|tutup|udahan|selesai|cukup|stop|goodbye|bye)\b',re.I)
+
+
+class _PrivateTwilioLog(logging.Filter):
+    def filter(self,entry):
+        # httpx INFO includes full URLs; the status query contains a private To.
+        return 'api.twilio.com' not in entry.getMessage()
+
+
+logging.getLogger('httpx').addFilter(_PrivateTwilioLog())
+
+
+def redact_transcript(text):
+    text=re.sub(r'https?://\S+|/f/[A-Za-z0-9_-]{43}|\bv1\.[A-Za-z0-9_.-]+','[url]',str(text),flags=re.I)
+    def hide(match):
+        return '[phone]' if len(re.sub(r'\D','',match.group()))>=8 else match.group()
+    text=re.sub(r'\+?\d(?:[\d(). -]*\d)?',hide,text)
+    return ''.join(char for char in text if char>=' ' or char in '\n\t')[:500]
+
+
+def reserve_uat_pair(database,responder_id,level,now,diagnostic):
+    """One explicit CLI-only diagnostic→normal pair, max two attempts/WIB day.
+
+    No ordinary counter reset. Only the second matching normal UAT attempt may
+    skip the daily cap; quiet hours and cooldown always apply.
+    """
+    key='call-policy:'+responder_id
+    pair_key='uat-pair:'+responder_id
+    today=now.astimezone(WIB).date().isoformat()
+    with database.connect() as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        def read(name):
+            row=connection.execute('SELECT value FROM kv WHERE key=?',(name,)).fetchone()
+            return json.loads(row['value']) if row else {}
+        state,pair=read(key),read(pair_key)
+        count=state.get('count',0) if state.get('date')==today else 0
+        paired=pair.get('count',0) if pair.get('date')==today else 0
+        if paired>=2:
+            return False,'uat_pair_complete'
+        if paired==0:
+            if not diagnostic:
+                return False,'uat_pair_requires_diagnostic'
+            allowed,reason=decision('voice',level,now,calls_today=count,last_call=state.get('last_call'),risk_override=True)
+        else:
+            if diagnostic or count!=1 or pair.get('phase')!='diagnostic':
+                return False,'uat_pair_sequence'
+            allowed,reason=decision('voice',level,now,calls_today=0,last_call=state.get('last_call'),risk_override=True)
+        if not allowed:
+            return False,reason
+        updates={key:{'date':today,'count':count+1,'last_call':now.timestamp()},
+                 pair_key:{'date':today,'count':paired+1,'phase':'diagnostic' if diagnostic else 'complete'}}
+        for name,value in updates.items():
+            connection.execute('INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(name,json.dumps(value)))
+    return True,'allowed_uat_pair'
 
 
 @dataclass(repr=False)
@@ -151,7 +205,9 @@ class VoiceService:
         mode,day=state.get('mode','live'),state.get('day',0)
         return self.tools.get_village_status(row['village_id'],mode,day),state
 
-    def call(self,responder_id,diagnostic=False, *,uat=False):
+    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False):
+        if cli_uat_pair and not diagnostic:
+            uat=True
         if diagnostic and uat:
             raise ValueError('Choose one test flow')
         status,context=self._context(responder_id)
@@ -170,7 +226,8 @@ class VoiceService:
             # Diagnostic risk bypass is reserved for the actual chosen consenting UAT contact.
             raise ChannelUnavailable('Diagnostic requires the chosen protected test recipient')
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
-        allowed,reason=reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock))
+        allowed,reason=(reserve_uat_pair(self.db,responder_id,policy_status.level,now,diagnostic) if cli_uat_pair and not mock else
+                        reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock)))
         call_id=identifier('vc')
         trace=context.get('trace_id') or identifier('t')
         if not allowed:
@@ -195,6 +252,12 @@ class VoiceService:
                 response=client.post('https://api.twilio.com/2010-04-01/Accounts/'+self.settings.account_sid+'/Calls.json',data=form)
                 if response.status_code>=400:
                     outcome='failed' if response.status_code<500 else 'unknown'
+                    try:
+                        code=response.json().get('code')
+                        if isinstance(code,int) and not isinstance(code,bool) and 0<code<1000000:
+                            session['error_code']=code
+                    except (ValueError,AttributeError):
+                        pass
                 else:
                     provider_id=response.json().get('sid','')
                     if re.fullmatch(r'CA[0-9a-fA-F]{32}',provider_id):
@@ -208,10 +271,54 @@ class VoiceService:
             current.update(status=outcome)
             if session.get('provider_hash'):
                 current['provider_hash']=session['provider_hash']
+            if session.get('error_code'):
+                current['error_code']=session['error_code']
             self.db.set(self._key(sid),current)
         record(self.db,'Warden','call_requested',trace_id=trace,input={'responder_id':responder_id,'mode':status.mode,'day':status.day,'policy_level':policy_status.level,'diagnostic':diagnostic,'uat':uat},
                output={'call_id':call_id,'status':outcome})
         return {'call_id':call_id,'status':outcome}
+
+    def status_report(self,responder_id):
+        """Explicit read-only CLI status, restricted to the configured consenting UAT phone."""
+        with self.db.connect() as connection:
+            if not connection.execute('SELECT 1 FROM responders WHERE id=?',(responder_id,)).fetchone():
+                raise KeyError('Unknown responder')
+            rows=connection.execute("SELECT direction,body FROM messages WHERE responder_id=? AND channel='voice' ORDER BY created_at DESC,rowid DESC LIMIT 30",(responder_id,)).fetchall()
+            saved=connection.execute("SELECT value FROM kv WHERE key LIKE 'voice-session:%'").fetchall()
+        transcript=[{'direction':row['direction'],'text':redact_transcript(row['body'])} for row in reversed(rows)]
+        attempts=[]
+        for row in saved:
+            state=json.loads(row['value'])
+            if state.get('responder_id')==responder_id:
+                attempts.append({'call_id':state['call_id'],'status':state.get('provider_status',state.get('status','unknown')),
+                                 'error_code':state.get('error_code')})
+        result={'mode':self.mode(),'calls':[],'attempts':attempts[-5:],'transcript':transcript,'error_code':None}
+        if self.channels.settings.public_demo or self.channels.settings.force_mock:
+            return result
+        self.settings.validate()
+        phone=self.channels.contacts().phone_for(responder_id)
+        if not hmac.compare_digest(phone.encode(),self.settings.uat_phone.encode()):
+            raise ChannelUnavailable('Only chosen UAT status is enabled')
+        try:
+            with httpx.Client(transport=self.transport,timeout=10,follow_redirects=False,trust_env=False,
+                              auth=(self.settings.account_sid,self.settings.auth_token)) as client:
+                response=client.get('https://api.twilio.com/2010-04-01/Accounts/'+self.settings.account_sid+'/Calls.json',params={'To':phone,'PageSize':5})
+            body=response.json()
+            if response.status_code!=200:
+                code=body.get('code') if isinstance(body,dict) else None
+                result['error_code']=code if isinstance(code,int) and not isinstance(code,bool) and 0<code<1000000 else 'provider_unavailable'
+                return result
+            for call in body.get('calls',[])[:5]:
+                if call.get('to')!=phone or not re.fullmatch(r'CA[0-9a-fA-F]{32}',call.get('sid','')):
+                    continue
+                if call.get('status') not in ('queued','initiated','ringing','in-progress','completed','busy','failed','no-answer','canceled'):
+                    continue
+                code=call.get('error_code')
+                result['calls'].append({'call_sid':call['sid'],'status':call['status'],
+                    'error_code':code if isinstance(code,int) and not isinstance(code,bool) and 0<code<1000000 else None})
+        except (httpx.HTTPError,ValueError,TypeError,AttributeError):
+            result['error_code']='provider_unavailable'
+        return result
 
     def authenticate(self,path,raw_query,params,signature):
         try:
@@ -370,7 +477,10 @@ class VoiceService:
             if session.get('provider_hash') and (not provider or hashlib.sha256(provider.encode()).hexdigest()!=session['provider_hash']):
                 raise HTTPException(403,'Call scope mismatch')
             session['provider_status']=value
+            error=params.get('ErrorCode',[''])[0]
+            if re.fullmatch(r'[0-9]{1,6}',error) and int(error)>0:
+                session['error_code']=int(error)
             self.db.set(self._key(sid),session)
             record(self.db,'Warden','call_status',trace_id=session['trace_id'],input={'call_id':session['call_id'],'responder_id':session['responder_id']},
-                   output={'status':value,'duration_seconds':seconds},event_id='e_voice_status_'+hashlib.sha256(sid.encode()).hexdigest()+'_'+value+'_'+str(seconds))
+                   output={'status':value,'duration_seconds':seconds,'error_code':session.get('error_code')},event_id='e_voice_status_'+hashlib.sha256(sid.encode()).hexdigest()+'_'+value+'_'+str(seconds))
         return {'accepted':True}

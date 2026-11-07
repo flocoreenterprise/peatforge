@@ -17,6 +17,9 @@ def main(argv=None):
     sys.path.insert(0, str(ROOT))
     from dotenv import load_dotenv
     load_dotenv(ROOT / '.env', override=True)
+    # Explicit attended CLI commands use the protected store; the open demo
+    # server exposes only that store's three authenticated Twilio callbacks.
+    os.environ['PUBLIC_DEMO']='false'
     try:
         if args[0] == 'voice':
             from agents.cli_voice import main as run

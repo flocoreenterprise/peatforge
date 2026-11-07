@@ -72,7 +72,7 @@ class OutboundTests(unittest.TestCase):
 
     def test_missing_provider_fails_closed_without_fake_followup(self):
         action=self.propose()
-        self.channels.settings.gateway_url=''
+        self.channels.settings.gateway_url='invalid-but-configured'
         result=self.client.post('/api/actions/'+action['id']+'/approve',json={})
         self.assertEqual(result.json()['status'],'approved')
         self.assertEqual(result.json()['followup_status'],'failed')

@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
         tools=ToolService(database,mock=app.state.public_demo,engine=app.state.engine)
         adapter.outbound_policy=lambda responder,channel:sms_policy(database,tools,responder,channel,datetime.now(timezone.utc))
         if args.command == 'check':
-            if settings.public_demo or settings.force_mock:
+            if settings.sms_mock:
                 print('mock: public demo; no provider check performed')
             else:
                 adapter.gateway.check()

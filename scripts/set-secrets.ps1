@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string[]]$Name)
+param([string[]]$Name, [switch]$GenerateMissingServerSecrets, [switch]$EnableUat, [switch]$OpenDemo, [string]$PublicBaseUrl)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -43,6 +43,14 @@ function Test-SettingShape {
 
 function New-SettingSecret {
     param([string]$SettingName)
+    if ($SettingName -eq 'DEMO_PIN') {
+        $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+        $bytes = [byte[]]::new(4)
+        try {
+            do { $rng.GetBytes($bytes); $number = [BitConverter]::ToUInt32($bytes,0) } while ($number -ge 4294000000)
+            return ($number % 1000000).ToString('D6')
+        } finally { [Array]::Clear($bytes,0,$bytes.Length); $rng.Dispose() }
+    }
     if ($SettingName -notin @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
         throw 'Konfigurasi ini tidak mendukung !generate.'
     }
@@ -89,7 +97,7 @@ function Invoke-SecretSetup {
     try {
         foreach ($setting in ($SelectedNames | Select-Object -Unique)) {
             do {
-                $hint = if ($setting -in @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) { ', !generate=buat lokal' } else { '' }
+                $hint = if ($setting -in @('DEMO_PIN','CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) { ', !generate=buat lokal' } else { '' }
                 $secure = Read-Host -Prompt ($setting + ' (kosong=lewati, !clear=hapus' + $hint + '; ulang jika format salah)') -AsSecureString
                 $pointer = [IntPtr]::Zero
                 $value = $null
@@ -103,7 +111,7 @@ function Invoke-SecretSetup {
                 }
                 if ($value.Length -eq 0) { break }
                 if ($value -ceq '!clear') { $updates[$setting] = ''; break }
-                if ($value -ceq '!generate' -and $setting -in @('CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
+                if ($value -ceq '!generate' -and $setting -in @('DEMO_PIN','CONTACT_ENCRYPTION_KEY','SESSION_SECRET','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
                     $value = New-SettingSecret -SettingName $setting
                 }
                 if (Test-SettingShape -SettingName $setting -Value $value) { $updates[$setting] = $value; break }
@@ -116,8 +124,44 @@ function Invoke-SecretSetup {
     finally { $value = $null; $updates.Clear() }
 }
 
+function Initialize-UatSettings {
+    param([string]$Path, [bool]$GenerateMissing, [bool]$Enable, [string]$BaseUrl, [bool]$PublicDemo = $false)
+    $updates = [ordered]@{}
+    $existing = @{}
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            foreach ($line in [IO.File]::ReadAllLines($Path)) {
+                if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+                    $existing[$Matches[1]] = $Matches[2].Trim().Trim([char]39).Trim([char]34)
+                }
+            }
+        }
+        if ($GenerateMissing) {
+            foreach ($key in @('DEMO_PIN','SESSION_SECRET','CONTACT_ENCRYPTION_KEY','PHONE_HASH_SALT','SMS_WEBHOOK_SECRET','SMS_SIGNING_KEY')) {
+                if (-not $existing.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($existing[$key])) {
+                    $updates[$key] = New-SettingSecret -SettingName $key
+                } elseif (-not (Test-SettingShape -SettingName $key -Value $existing[$key])) {
+                    throw 'Existing server setting has invalid shape; update it using interactive setup.'
+                }
+            }
+        }
+        if ($Enable) { $updates['PUBLIC_DEMO']='false'; $updates['PEATFORGE_LIVE_CHANNELS']='true' }
+        if ($PublicDemo) { $updates['PUBLIC_DEMO']='true' }
+        if ($BaseUrl) {
+            if (-not (Test-SettingShape -SettingName 'PUBLIC_BASE_URL' -Value $BaseUrl)) { throw 'Invalid public base URL.' }
+            $updates['PUBLIC_BASE_URL']=$BaseUrl
+        }
+        if ($updates.Count) { Update-EnvSettings -Path $Path -Updates $updates }
+        Write-Output 'Server settings saved; existing secrets preserved; no values displayed.'
+    } finally { $existing.Clear(); $updates.Clear(); $line=$null }
+}
+
 # Dot sourcing exposes helpers for isolated tests, without asking for real secrets.
 if ($MyInvocation.InvocationName -ne '.') {
-    try { Invoke-SecretSetup -SelectedNames $Name }
+    try {
+        if ($GenerateMissingServerSecrets -or $EnableUat -or $OpenDemo -or $PublicBaseUrl) {
+            Initialize-UatSettings -Path (Join-Path (Split-Path -Parent $PSScriptRoot) '.env') -GenerateMissing $GenerateMissingServerSecrets -Enable $EnableUat -BaseUrl $PublicBaseUrl -PublicDemo $OpenDemo
+        } else { Invoke-SecretSetup -SelectedNames $Name }
+    }
     catch { Write-Error 'Konfigurasi gagal disimpan. Nilai tidak ditampilkan.' -ErrorAction Continue; exit 1 }
 }

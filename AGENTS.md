@@ -105,3 +105,10 @@ Hard rules:
 - Operator auth or responder field-token scope; tools force identity and reuse SMS parser/readback/plausibility/Verifier. Five session requests/minute/token.
 - Browser voice is user-initiated; no autonomous real browser/provider calls. SMS/Twilio remain governed separately by protected live-channel gates.
 - At12:45 if browser voice is not green keep it behind clearly labelled Simulasi fallback. Feature freeze13:00 unchanged.
+
+## Attended UAT override
+- User authorized live Realtime mint and two chosen Telkomsel calls (diagnostic then Warden) on 2026-11-07; no XL numbers. Explicit CLI-only UAT pair is capped at two/day; ordinary one/day, quiet hours and cooldown remain.
+- User then revoked the PIN UI requirement: open fixture demo remains public. scripts/start.ps1 -Uat exposes only three signed Twilio callback POST routes from a separate protected app/store; no protected operator endpoint is exposed.
+- User authorized generation of missing server secrets, including PIN, solely through set-secrets.ps1; never print them. Existing nonempty secrets are preserved.
+- Tunnel stays open until user says UAT done. No automated background dispatch during attended UAT; SMS is mock without gateway settings.
+- After live UAT only: FIRMS2019 archive if configured and OSM canal geometry, each must pass by12:50 or roadmap. No blocked-site scraping/accounts. Measured SIPALAGA WT is the first pilot calibration roadmap step. Freeze13:00.

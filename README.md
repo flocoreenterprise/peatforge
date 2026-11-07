@@ -93,3 +93,7 @@ Read AGENTS.md and CONTRACT.md before edits; contract includes planned routes, w
 ## Browser Warden
 
 Open Telepon-SMS and select Telepon Warden (or use the scoped responder page). Browser voice uses an ephemeral credential, gpt-realtime-2.1 and marin by default. Allow the microphone only when starting a call. Final transcripts pass the server guard before buffered audio plays; report confirmation requires the validated readback followed by a new YA. Provider or browser errors retain the labelled Simulasi text flow. Numeric paraphrases may fail closed. Live session mint and real microphone quality remain separate UAT checks.
+
+## Attended UAT with an open demo
+
+`./scripts/start.ps1 -Uat` serves the public fixture demo and only the three signed Twilio callbacks from an isolated protected store. CLI UAT commands use the protected store. This keeps real contacts and actions out of the open operator UI. `uat.ps1 -Action Diagnostic -UatPair` then `-Action Call -UatPair` implements the specifically authorized two-call test; it retains quiet hours/cooldown and blocks a third attempt. `uat.ps1 -Action Status` reads provider status and redacted transcripts. Keep the tunnel until the operator ends UAT. The launcher loads the latest set-secrets .env over stale inherited environment values.

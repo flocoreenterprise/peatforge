@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Install, [switch]$Build, [int]$Port = 8000)
+param([switch]$Install, [switch]$Build, [switch]$Uat, [int]$Port = 8000)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
@@ -25,8 +25,8 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Web build failed.' }
         } finally { Pop-Location }
     }
-    $serverArguments = @('-m','uvicorn','agents.app:app','--host','127.0.0.1','--port',"$Port",'--no-access-log','--no-proxy-headers')
-    if (Test-Path -LiteralPath '.env') { $serverArguments += @('--env-file', (Join-Path $repoRoot '.env')) }
+    $serverArguments = @('scripts/serve.py','--port',"$Port")
+    if ($Uat) { $serverArguments += '--uat' }
     & .\.venv\Scripts\python.exe @serverArguments
     if ($LASTEXITCODE -ne 0) { throw 'Server exited with an error.' }
 } finally { Pop-Location }

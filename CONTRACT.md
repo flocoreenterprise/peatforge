@@ -274,3 +274,9 @@ Uvicorn starts with --no-proxy-headers so request.client remains the socketpeer 
 - Browser responses are serialized with automatic provider response/interrupt generation disabled. Remote audio is buffered in memory and played only after matching transcript approval, completed response and drained output; rejected/unknown responses close the peer and show Simulasi. No audio file is persisted. A separate client call limit is not the ephemeral credential expiry.
 - A report needs actual readback and a newer standalone confirmation. Bye words never mean yes. Field action proposals still need operator approval.
 - Config and field-message responses expose browser_voice_supported as a route capability, not proof of provider readiness. Real microphone/voice quality requires attended UAT.
+
+## Attended UAT isolation
+- Latest user keeps demo UI open. The UAT server uses separate demo/protected stores and routes only exact POST Twilio start/gather/status callbacks to the protected service; all operator/demo endpoints use fixtures and mocked Twilio/SMS.
+- Explicit CLI --uat-pair allows one diagnostic then one Warden call to the configured consenting recipient per WIB day; no counter reset, no third call, normal daily cap and cooldown remain. No HTTP field can opt in.
+- cli_voice status reads only the chosen recipient provider calls and redacted local voice transcript; it does not initiate calls.
+- SMS mock selection is independent of configured Twilio when gateway settings are absent; configured gateway failures never fall back to mock.

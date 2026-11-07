@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Check','Prepare','Call','Diagnostic','Sms','RegisterSms')][string]$Action = 'Check',
+    [ValidateSet('Check','Prepare','Call','Diagnostic','Status','Sms','RegisterSms')][string]$Action = 'Check',
     [ValidatePattern('^[A-Za-z0-9_-]{1,80}$')][string]$Responder = 'uat1',
     [switch]$Consent,
+    [switch]$UatPair,
     [string]$Text
 )
 $ErrorActionPreference = 'Stop'
@@ -18,11 +19,16 @@ switch ($Action) {
     }
     'Call' { $arguments += @('voice','call',$Responder,'--uat') }
     'Diagnostic' { $arguments += @('voice','call',$Responder,'--diag') }
+    'Status' { $arguments += @('voice','status',$Responder) }
     'RegisterSms' { $arguments += @('sms-register') }
     'Sms' {
         if ([string]::IsNullOrWhiteSpace($Text) -or $Text.Length -gt 300) { throw 'Supply an SMS of 1-300 characters.' }
         $arguments += @('sms','send',$Responder,$Text)
     }
+}
+if ($UatPair) {
+    if ($Action -notin @('Call','Diagnostic')) { throw 'UatPair is only valid for the explicitly authorized diagnostic and call.' }
+    $arguments += '--uat-pair'
 }
 Push-Location $repoRoot
 try {

@@ -29,6 +29,13 @@ class ChannelSettings:
     encryption_key: str = field(default='', repr=False)
     phone_salt: str = field(default='', repr=False)
 
+    @property
+    def sms_mock(self):
+        # Twilio may be explicitly live while the separate Android SMS gateway
+        # is unconfigured. Missing SMS configuration is a labelled simulation;
+        # a configured provider rejection/error never switches to mock.
+        return self.public_demo or self.force_mock or not all((self.gateway_url,self.gateway_user,self.gateway_pass))
+
     @classmethod
     def from_environment(cls, *, public_demo: bool) -> 'ChannelSettings':
         live=os.environ.get('PEATFORGE_LIVE_CHANNELS','').strip().lower()
@@ -165,7 +172,7 @@ class ChannelAdapter:
                     raise ValueError('Message receipt scope mismatch')
                 return idempotency_key
         message_id = idempotency_key or identifier('m')
-        status = 'mock' if mock_only or self.settings.force_mock or self.settings.public_demo or channel == 'web' else 'pending'
+        status = 'mock' if mock_only or self.settings.force_mock or self.settings.public_demo or channel == 'web' or channel=='sms' and self.settings.sms_mock else 'pending'
         connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at,reply_exempt) VALUES(?,?,?,?,?,?,?,?,?,?)',
             (message_id,responder_id,'outbound',channel,text,speech,status,trace_id,utc_now(),int(reply_exempt)))
         return message_id
