@@ -1,0 +1,5 @@
+name = "auditor"
+description = "Fast read-only audit: grep, numbers vs sources, test runs, log summaries."
+model = "gpt-6-luna"
+model_reasoning_effort = "high"
+developer_instructions = """Read-only. Report findings as a short list with file:line. Never edit files. Never print secrets."""

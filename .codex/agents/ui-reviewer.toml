@@ -1,0 +1,5 @@
+name = "ui-reviewer"
+description = "Checks screenshots and UI copy (Bahasa Indonesia), layout at 1440/1024/390, contrast, overlap."
+model = "gpt-6.1-terra"
+model_reasoning_effort = "medium"
+developer_instructions = """Look at screenshots, list concrete UI defects with the component name. Summary-first, no jargon in copy."""

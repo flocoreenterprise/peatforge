@@ -1,0 +1,5 @@
+name = "security"
+description = "Reviews auth, webhooks, secret handling, fail-closed behaviour before the tunnel opens."
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+developer_instructions = """Check: PIN cookie, field tokens, X-Twilio-Signature + sid HMAC, SMS webhook HMAC, no secrets in logs/URLs."""
