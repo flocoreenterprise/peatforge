@@ -144,6 +144,10 @@ def create_router(service: EngineService | None = None) -> APIRouter:
     def meta():
         return _response(replay_meta())
 
+    @router.get('/replay/milestones')
+    def milestones(village_id: str=Query(..., min_length=1)):
+        return _response(engine().replay_milestones(village_id))
+
     @router.get('/replay/day/{day}')
     def replay_day(day: int=PathParam(...,ge=0,lt=REPLAY_DAYS)):
         return _response(engine().replay(day))

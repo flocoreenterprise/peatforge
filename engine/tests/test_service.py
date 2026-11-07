@@ -149,6 +149,44 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(geo['features'][0]['geometry']['type'],'Point')
         self.assertTrue(any('perfect-forecast' in a for a in first['items'][0]['assumptions']))
 
+    def test_replay_milestones_compute_first_crossings_and_exclude_forecast_tail(self):
+        run = self.engine._run(V, 'replay', 0)
+        points = curve([40] * 76)
+        points[7]['wt_cm'] = 60
+        points[11]['pfvi'] = 175
+        points[19]['pfvi'] = 250
+        with patch.object(self.engine, '_run', return_value=dict(run, curve=points)):
+            result = self.engine.replay_milestones(V)
+        by_kind = {item['kind']:item for item in result['items']}
+        self.assertEqual({k:v['day'] for k,v in by_kind.items()},
+                         {'wt_60':7, 'pfvi_175':11, 'pfvi_250':19, 'critical':7})
+        self.assertEqual(by_kind['wt_60']['date'], '2019-06-22')
+        self.assertEqual(by_kind['pfvi_250']['pfvi'], 250)
+        self.assertEqual(result['days'], 62)
+        self.assertEqual(result['source'], 'fixture')
+        self.assertTrue(any('perfect-forecast' in a for a in result['assumptions']))
+        points = curve([40] * 76)
+        points[62].update(wt_cm=60, pfvi=250)
+        with patch.object(self.engine, '_run', return_value=dict(run, curve=points)):
+            result = self.engine.replay_milestones(V)
+        for item in result['items']:
+            self.assertIsNone(item['day'])
+            self.assertIsNone(item['date'])
+            self.assertIsNone(item['wt_cm'])
+            self.assertIsNone(item['pfvi'])
+            self.assertEqual(item['reason'], 'not_reached_in_replay')
+        points[0].update(wt_cm=60, pfvi=250)
+        with patch.object(self.engine, '_run', return_value=dict(run, curve=points)):
+            self.assertTrue(all(item['day'] == 0 for item in self.engine.replay_milestones(V)['items']))
+
+    def test_replay_milestones_reuse_cached_run_without_new_fetch(self):
+        self.engine.village_status(V, 'replay', 0)
+        with patch.object(self.engine.ingest, 'weather', side_effect=AssertionError('No new provider call')):
+            result = self.engine.replay_milestones(V)
+        actual = self.engine._run(V, 'replay', 0)['curve'][:62]
+        self.assertEqual(result['items'][-1]['day'], critical_index(actual))
+        json.dumps(result, allow_nan=False)
+
     def test_default_hotspots_union_pilot_circles_deduplicated(self):
         class Regional(Ingest):
             def hotspots(self):

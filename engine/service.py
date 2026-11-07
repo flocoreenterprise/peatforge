@@ -302,6 +302,29 @@ class EngineService:
         return {'mode':'replay','day':day,'date':(START+timedelta(days=day)).isoformat(),
                 'items':[self.village_status(v['id'],'replay',day) for v in list_villages()]}
 
+    def replay_milestones(self, village_id: str) -> dict:
+        """First actual model crossings inside the inclusive replay calendar."""
+        run = self._run(village_id, 'replay', 0)
+        curve = run['curve'][:REPLAY_DAYS]
+        thresholds = (
+            ('wt_60', lambda p: p['wt_cm'] is not None and p['wt_cm'] >= 60),
+            ('pfvi_175', lambda p: p['pfvi'] is not None and p['pfvi'] >= 175),
+            ('pfvi_250', lambda p: p['pfvi'] is not None and p['pfvi'] >= 250),
+            ('critical', lambda p: critical_reason(p) is not None),
+        )
+        items = []
+        for kind, reached in thresholds:
+            day = next((i for i, point in enumerate(curve) if reached(point)), None)
+            point = curve[day] if day is not None else None
+            items.append({'kind':kind, 'day':day, 'date':point['date'] if point else None,
+                          'wt_cm':point['wt_cm'] if point else None, 'pfvi':point['pfvi'] if point else None,
+                          'reason':None if point else 'not_reached_in_replay'})
+        weather = run['weather']
+        return dict(replay_meta(), village_id=village_id, mode='replay', items=items,
+                    source='fixture' if weather['source'] == 'fixture' else 'modelled',
+                    stale=weather['stale'], data_as_of=weather['data_as_of'],
+                    assumptions=run['assumptions'])
+
     def params_history(self, village_id: str) -> list[dict]:
         get_village(village_id)
         with self._state_lock:

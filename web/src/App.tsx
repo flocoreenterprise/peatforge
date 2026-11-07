@@ -7,6 +7,7 @@ import VillageDetail from './village/VillageDetail';
 import AgentTrace from './trace/AgentTrace';
 import FieldInbox from './field/FieldInbox';
 import NationalView from './national/NationalView';
+import ReplayJumps from './replay/ReplayJumps';
 import { usePilot, dateLabel, replayDate, number, type Mode } from './map/pilot';
 
 type Tab = 'Keputusan' | 'Desa' | 'Telepon-SMS' | 'Jejak';
@@ -31,7 +32,7 @@ function CommandApp() {
   const [tab, setTab] = useState<Tab>('Desa');
   const [scope, setScope] = useState<'pilot' | 'national'>('pilot');
   const [scoutError, setScoutError] = useState('');
-  const [mode, setMode] = useState<Mode>('live');
+  const [mode, setMode] = useState<Mode>('replay');
   const [day, setDay] = useState(9);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectVillage = useCallback((id: string) => { setSelectedId(id); setTab('Desa'); }, []);
@@ -48,12 +49,12 @@ function CommandApp() {
   const initialize = useCallback(async () => {
     setError(''); setPhase('loading');
     try {
-      const next = await api<Config>('/config'); setConfig(next); setPreview(false); setPhase('command');
+      const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false) setMode('live'); setPreview(false); setPhase('command');
     } catch (failure) {
       if (failure instanceof ApiError && (failure.status === 401 || failure.status === 403)) { setPhase('login'); return; }
       // Only unavailable services activate the labelled, read-only shell preview.
       try {
-        const next = await api<Config>('/config'); setConfig(next); setPreview(false); setPhase('command');
+        const next = await api<Config>('/config'); setConfig(next); if (next.public_demo === false) setMode('live'); setPreview(false); setPhase('command');
       } catch (configFailure) {
         if (configFailure instanceof ApiError && (configFailure.status === 401 || configFailure.status === 403)) { setPhase('login'); setError('Masuk dengan PIN operator untuk melanjutkan.'); return; }
         setConfig(mockConfig); setPreview(true); setPhase('command');
@@ -110,7 +111,7 @@ function CommandApp() {
     <section className={`command-body ${preview || pilot.error || scoutBanner || connection ? 'has-banner' : ''}`}>
       {scope === 'national' ? <div className="national-shell"><NationalView/></div> : <>
       <MapCanvas dark={dark} villages={villages} risk={risk} hotspots={hotspots} selectedId={selected?.id ?? null} onSelect={selectVillage}/>
-      <section className="replay-control glass-panel" aria-label="Waktu pantauan"><div className="mode-switch"><button className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>{mode === 'replay' && <div className="replay-slider"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari replay" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/><span>ERA5 · prakiraan sempurna historis</span></div>}</section>
+      <section className="replay-control glass-panel" aria-label="Waktu pantauan"><div className="mode-switch"><button className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>{mode === 'replay' && <div className="replay-slider"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari replay" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/><span>ERA5 · prakiraan sempurna historis</span>{selected && <ReplayJumps villageId={selected.id} onJump={setDay}/>}</div>}</section>
       <div className="workspace-toolbar"><div className="location-selector"><MapPin size={16}/><span>Wilayah pilot</span></div><span className="live-badge"><Radio size={13}/>{preview ? 'Pratinjau mock' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.mode === 'mock' ? 'Kanal simulasi' : 'LIVE'}</span><button className="drawer-toggle" onClick={() => setDrawer(!drawer)} aria-expanded={drawer} aria-label="Buka panel informasi">{drawer ? <X size={18}/> : <Menu size={18}/>}</button></div>
       {(preview || pilot.error || scoutBanner || connection) && <div className="environment-banner" role="status">{connection || pilot.error || scoutBanner || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
       <aside className="operations-panel glass-panel">

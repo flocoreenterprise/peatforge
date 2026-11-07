@@ -65,6 +65,18 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.json()['error']['code'],'invalid')
         fetch.assert_not_called()
 
+    def test_replay_milestones_route_and_safe_validation(self):
+        service = EngineService(Ingest())
+        client = TestClient(app_for(service))
+        service.village_status(V, 'replay', 0)
+        with patch.object(service.ingest, 'weather', side_effect=AssertionError('No new provider call')):
+            response = client.get(f'/api/replay/milestones?village_id={V}')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), service.replay_milestones(V))
+        self.assertEqual(client.get('/api/replay/milestones').status_code, 422)
+        self.assertEqual(client.get('/api/replay/milestones?village_id=').status_code, 422)
+        self.assertEqual(client.get('/api/replay/milestones?village_id=unknown').status_code, 404)
+
     def test_simulate_strict_agent_shape(self):
         response=self.client.post(f'/api/villages/{V}/simulate',json={
             'type':'canal_block','targets':['K4'],'delta_hc_cm':60,'days':14,'mode':'replay','day':9})
@@ -114,6 +126,7 @@ class APITests(unittest.TestCase):
             raise HTTPException(401,'auth required')
         client=TestClient(app_for(dependency=deny))
         for method,path,payload in [('GET','/api/villages',None),('GET','/api/replay/meta',None),
+                                    ('GET',f'/api/replay/milestones?village_id={V}',None),
                                     ('POST','/api/warmup',{}),('POST',f'/api/villages/{V}/simulate',{})]:
             response=client.request(method,path,json=payload)
             self.assertEqual(response.status_code,401)
