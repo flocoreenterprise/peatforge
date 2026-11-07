@@ -46,9 +46,12 @@ Changes require orchestrator agreement. Phase 2 has been authorized by the user'
 ## Auth, secrets and external effects
 
 - Latest user override: show operator openly now; no secrets setup yet. PUBLIC_DEMO=true is the default for blank/unset values.
-  In this explicit public demo, operator dependency permits access, engine uses fixtures, outbound adapters are mocked,
-  and storage is a separate fixture-only database. Return public_demo:true and render a visible simulation badge.
-  Never expose real responder contacts, secrets or provider-backed actions in public demo even if credentials exist.
+  In this explicit public demo, operator dependency permits access, outbound adapters are mocked,
+  and storage is a separate demo database without real contacts. Auth, data source and channels are independent.
+  Integrate public environmental provider data without keys and cache it; numerical engine must run over those inputs when available.
+  Fixtures are explicit fallback/selected demo input, not a consequence of skipping PIN. Return public_demo:true;
+  render 'Demo terbuka · kanal simulasi' and per-source provider/cache/model/fixture provenance.
+  Never expose real responder contacts, secrets or real outbound actions in public demo even if credentials exist.
   PUBLIC_DEMO=false enables protected operation and the following PIN requirements.
 - Every operator route has a shared auth dependency, including config, trace, simulate and outbound calls.
 - PIN six digits, HttpOnly HMAC cookie 12 hours, SameSite strict/lax, Secure on HTTPS; 5 login attempts/min/IP.
@@ -195,7 +198,10 @@ Anonymous mapping retained privately for follow-up; mask operator responses and 
 
 | Name | When needed / validation |
 | --- | --- |
-| PUBLIC_DEMO | true/false; blank/unset defaults true per user; true = open fixture-only demo, no real channels |
+| PUBLIC_DEMO | true/false; blank/unset defaults true per user; true = open operator, no real contacts/channels; environmental sources independent |
+| PEATFORGE_DB_PATH | Optional SQLite path; guard database scope so public demo never reuses real-contact storage |
+| PEATFORGE_ENGINE_MODE | mock/real; mock until service exists, then real numerical engine (independent from auth) |
+| PEATFORGE_DATA_SOURCE | live/fixture; live = public no-key providers+cache; fixture must be labelled explicitly |
 | DEMO_PIN | Required for operator login; exactly 6 digits; masked |
 | SESSION_SECRET | Required auth HMAC; >=32 characters; masked |
 | CONTACT_ENCRYPTION_KEY | Required before binding real phone; Fernet 32-byte URL-safe base64 key |

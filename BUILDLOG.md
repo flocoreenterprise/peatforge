@@ -27,3 +27,18 @@ No provider keys, actual recipients or live delivery have been configured. Real 
 ## Evidence
 
 Task results are appended here by the orchestrator. Test counts are only recorded after actual execution.
+
+### User correction — source/auth independence
+
+The user's approved side conversation clarified that skipping PIN does NOT require fixture data.
+Public environmental provider data and historical archives must be integrated, cached, verified and labelled.
+Only contact state and external messaging remain mock in the open demo. PUBLIC_DEMO is an access/channel choice,
+not an environmental source switch. Existing matching implementation is retained; no restart.
+Reference app may be used visually/behaviorally when its URL is available, never by reading old source.
+
+### A1 and B1
+
+- A1 commit 08bf942; 14 offline tests pass, including archive date bound added after Luna audit.
+- B1 commit ff92501; 14 offline tests pass, including public/protected database scope separation after Luna audit.
+- Root dependency environment created. PowerShell launch scripts parse successfully; actual launch succeeded on 8000.
+- Real provider retrieval checks begun independently of credentials. No messages/calls sent.

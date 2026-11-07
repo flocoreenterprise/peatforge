@@ -9,6 +9,8 @@ function Test-SettingShape {
     if ($Value -match "[\r\n\x00']" -or $Value.Length -gt 4096) { return $false }
     switch ($SettingName) {
         'PUBLIC_DEMO' { return $Value -cmatch '^(true|false)$' }
+        'PEATFORGE_ENGINE_MODE' { return $Value -cmatch '^(mock|real)$' }
+        'PEATFORGE_DATA_SOURCE' { return $Value -cmatch '^(live|fixture)$' }
         'DEMO_PIN' { return $Value -cmatch '^\d{6}$' }
         'OPENAI_API_KEY' { return $Value -cmatch '^sk-[A-Za-z0-9_-]{16,}$' }
         'TWILIO_ACCOUNT_SID' { return $Value -cmatch '^AC[0-9a-fA-F]{32}$' }

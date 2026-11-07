@@ -29,8 +29,11 @@ Hard rules:
 - Builders own only their assigned folder: Lead `engine/`, CS #1 `agents/`, CS #2 `web/`.
 - One prompt from the pack per task. Never run two writers in the same folder at once.
 - No changes to another owner's files; report needed changes to the orchestrator.
-- Latest user override: skip login now, show the operator openly. PUBLIC_DEMO defaults true; fixture data and mock outbound only.
-  Preserve PIN auth for protected mode (PUBLIC_DEMO=false). Public demo must not access live contacts or send live SMS/calls.
+- Latest user override: skip login now, show the operator openly. PUBLIC_DEMO defaults true; mock outbound only.
+  Auth, environmental data source and channels are independent. Integrate real no-key public weather/hotspots/history and caches;
+  label provider/cache/model/fixture accurately. Preserve PIN auth for protected mode (PUBLIC_DEMO=false).
+  Public demo must not access real contacts or send live SMS/calls. Reference application may be inspected visually if a URL is available;
+  its source and rehearsal remain off-limits. Match the planning pack's flows/capabilities before refinement.
 
 ## Execution and review
 
