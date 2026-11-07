@@ -8,7 +8,7 @@ _KEYS = {'village_id','responder_id','mode','day','level','level_from','level_to
          'wt_gain_cm','pfvi_reduction','checks','name','passed','available','detections','limit_cm',
          'model_wt_cm','observed_wt_cm','override','hour','channel','state','version','recalibrated',
          'arguments','result','input','output','type','targets','delta_hc_cm','days',
-         'baseline_critical_date','scenario_critical_date'}
+         'baseline_critical_date','scenario_critical_date','diagnostic','duration_seconds','turn','uat'}
 
 
 def safe_fields(value):

@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Any, Callable
 from urllib.parse import urlencode, urlsplit
 import httpx
+from engine.cache import DataUnavailable
 from pydantic import Field
 from .contacts import Contacts
 from .db import Database, identifier, utc_now
@@ -40,6 +41,10 @@ class ChannelSettings:
 
 
 class ChannelUnavailable(Exception):
+    pass
+
+
+class DeliveryUnknown(ChannelUnavailable):
     pass
 
 
@@ -96,7 +101,13 @@ class Gateway:
                 response.raise_for_status()
                 # Provider response can contain recipients or secrets; only inspect locally.
                 return response.json() if response.content else {}
-        except (httpx.HTTPError, ValueError):
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code>=500:
+                raise DeliveryUnknown('Provider delivery outcome unknown') from None
+            raise ChannelUnavailable('SMS provider request rejected') from None
+        except (httpx.RequestError,ValueError):
+            raise DeliveryUnknown('Provider delivery outcome unknown') from None
+        except httpx.HTTPError:
             raise ChannelUnavailable('SMS provider request failed') from None
 
     def send(self, phone: str, text: str) -> None:
@@ -123,6 +134,7 @@ class ChannelAdapter:
         self.on_inbound: Callable[[Inbound], dict[str, Any]] | None = None
         self.prepare_inbound: Callable[[Inbound], Inbound] | None = None
         self._inbound_lock = RLock()
+        self.outbound_policy:Callable[[str,str],tuple[bool,str]]|None=None
 
     def contacts(self) -> Contacts:
         if self.settings.public_demo:
@@ -130,34 +142,83 @@ class ChannelAdapter:
         return Contacts(self.db, self.settings.encryption_key, self.settings.phone_salt)
 
     def send(self, responder_id: str, text: str, channel: Channel = 'sms', *, speech: str | None = None, trace_id: str | None = None,
-             mock_only: bool = False, idempotency_key: str | None = None) -> dict[str, str]:
+             mock_only: bool = False, idempotency_key: str | None = None,reply_exempt:bool=False) -> dict[str, str]:
+        with self.db.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            message_id=self.enqueue(responder_id,text,channel,speech=speech,trace_id=trace_id,mock_only=mock_only,
+                                    idempotency_key=idempotency_key,reply_exempt=reply_exempt,connection=connection)
+        result=self.dispatch(message_id)
+        if result['status'] in ('failed','unknown','dispatching'):
+            raise ChannelUnavailable('SMS delivery unavailable or uncertain')
+        return result
+
+    def enqueue(self,responder_id,text,channel='sms', *,speech=None,trace_id=None,mock_only=False,idempotency_key=None,reply_exempt=False,connection):
+        """Caller may atomically enqueue a follow-up with its action approval."""
         if channel not in (('sms','web','voice') if mock_only else ('sms', 'web')) or not text.strip() or len(text) > 300:
             raise ValueError('Invalid outbound message')
-        with self.db.connect() as connection:
-            if not connection.execute('SELECT 1 FROM responders WHERE id=?', (responder_id,)).fetchone():
-                raise ValueError('Unknown responder')
-            if idempotency_key:
-                existing=connection.execute('SELECT responder_id,channel,status FROM messages WHERE id=?',(idempotency_key,)).fetchone()
-                if existing:
-                    if existing['responder_id']!=responder_id or existing['channel']!=channel:
-                        raise ValueError('Message receipt scope mismatch')
-                    return {'message_id':idempotency_key,'status':existing['status']}
+        if not connection.execute('SELECT 1 FROM responders WHERE id=?', (responder_id,)).fetchone():
+            raise ValueError('Unknown responder')
+        if idempotency_key:
+            existing=connection.execute('SELECT responder_id,channel FROM messages WHERE id=?',(idempotency_key,)).fetchone()
+            if existing:
+                if existing['responder_id']!=responder_id or existing['channel']!=channel:
+                    raise ValueError('Message receipt scope mismatch')
+                return idempotency_key
         message_id = idempotency_key or identifier('m')
         status = 'mock' if mock_only or self.settings.force_mock or self.settings.public_demo or channel == 'web' else 'pending'
+        connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at,reply_exempt) VALUES(?,?,?,?,?,?,?,?,?,?)',
+            (message_id,responder_id,'outbound',channel,text,speech,status,trace_id,utc_now(),int(reply_exempt)))
+        return message_id
+
+    def dispatch(self,message_id):
+        """Reserve before POST. Never retry unknown/failed/dispatching outcomes."""
         with self.db.connect() as connection:
-            connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-                (message_id, responder_id, 'outbound', channel, text, speech, status, trace_id, utc_now()))
-        if status == 'pending':
+            row=connection.execute('SELECT * FROM messages WHERE id=?',(message_id,)).fetchone()
+        if not row:
+            raise KeyError('Unknown outbound message')
+        status=row['status']
+        if status=='pending':
+            # Configuration/consent failures occur before any provider attempt.
             try:
-                self.gateway.send(self.contacts().phone_for(responder_id), text)
-                status = 'queued'
-            except (ChannelUnavailable, ValueError):
+                # Only direct conversational replies to responder-initiated inbound
+                # messages are exempt. Operator/CLI messages and approval follow-ups
+                # always check CURRENT LIVE risk/time before a live provider attempt.
+                if not row['reply_exempt']:
+                    if self.outbound_policy is None:
+                        raise ChannelUnavailable('Outbound autonomy policy unavailable')
+                    allowed,reason=self.outbound_policy(row['responder_id'],row['channel'])
+                    if not allowed:
+                        with self.db.connect() as connection:
+                            connection.execute("UPDATE messages SET status='suppressed' WHERE id=? AND status='pending'",(message_id,))
+                        return {'message_id':message_id,'status':'suppressed','reason':reason}
+                self.gateway._base()
+                phone=self.contacts().phone_for(row['responder_id'])
+            except (ChannelUnavailable,ValueError,DataUnavailable,KeyError):
                 with self.db.connect() as connection:
-                    connection.execute("UPDATE messages SET status='failed' WHERE id=?", (message_id,))
-                raise ChannelUnavailable('SMS delivery unavailable') from None
+                    connection.execute("UPDATE messages SET status='failed' WHERE id=? AND status='pending'",(message_id,))
+                    status=connection.execute('SELECT status FROM messages WHERE id=?',(message_id,)).fetchone()['status']
+                return {'message_id':message_id,'status':status}
             with self.db.connect() as connection:
-                connection.execute('UPDATE messages SET status=? WHERE id=?', (status, message_id))
+                reserved=connection.execute("UPDATE messages SET status='dispatching' WHERE id=? AND status='pending'",(message_id,)).rowcount
+                if not reserved:
+                    return {'message_id':message_id,'status':connection.execute('SELECT status FROM messages WHERE id=?',(message_id,)).fetchone()['status']}
+            try:
+                self.gateway.send(phone,row['body'])
+                status='queued'
+            except DeliveryUnknown:
+                status='unknown'
+            except (ChannelUnavailable,ValueError):
+                status='failed'
+            with self.db.connect() as connection:
+                connection.execute("UPDATE messages SET status=? WHERE id=? AND status='dispatching'",(status,message_id))
         return {'message_id': message_id, 'status': status}
+
+    def record_voice(self,responder_id,text, *,direction='outbound',speech=None,trace_id=None,idempotency_key=None):
+        message_id=idempotency_key or identifier('m')
+        with self.db.connect() as connection:
+            connection.execute('INSERT OR IGNORE INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                               (message_id,responder_id,direction,'voice',text,speech,'recorded',trace_id,utc_now()))
+        return {'message_id':message_id,'status':'recorded'}
 
     def inbound(self, message: Inbound, *, external_id: str | None = None) -> dict[str, Any]:
         # Single-process app serializes duplicate delivery while callbacks run outside

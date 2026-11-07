@@ -51,6 +51,7 @@ class ChannelTests(unittest.TestCase):
         contacts = Contacts(self.db, self.settings.encryption_key, self.settings.phone_salt)
         contacts.bind('r1', '081234567890', consent=True)
         adapter = ChannelAdapter(self.db, self.settings, transport=transport)
+        adapter.outbound_policy=lambda responder,channel:(True,'fixture_policy')
         self.assertEqual(adapter.send('r1', 'Cek kanal 4')['status'], 'queued')
         self.assertEqual(requests[0].url.path, '/3rdparty/v1/messages')
         self.assertTrue(requests[0].headers['Authorization'].startswith('Basic '))
@@ -63,6 +64,7 @@ class ChannelTests(unittest.TestCase):
         contacts = Contacts(self.db, self.settings.encryption_key, self.settings.phone_salt)
         contacts.bind('r1', '081234567890', consent=True)
         adapter = ChannelAdapter(self.db, self.settings, transport=httpx.MockTransport(lambda request: httpx.Response(401)))
+        adapter.outbound_policy=lambda responder,channel:(True,'fixture_policy')
         with self.assertRaises(ChannelUnavailable):
             adapter.send('r1', 'test')
         with self.db.connect() as connection:

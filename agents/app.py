@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import Field
 from engine.api import create_router
@@ -28,6 +28,9 @@ from .events import list_events, record
 from .auth import AuthSettings, COOKIE_NAME, OperatorAuth, SESSION_SECONDS, peer_ip, secure_cookie
 from .field import FieldService
 from .security import SecurityHeaders
+from .voice import VoiceService,VoiceSettings
+from .scout import decision,sms_policy
+from urllib.parse import parse_qs
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
 
@@ -93,6 +96,17 @@ class FieldSend(Model):
     anonymous: Literal[False] = False
 
 
+class VoiceCall(Model):
+    responder_id:str=Field(min_length=1,max_length=80)
+    diagnostic:bool=False
+    uat:bool=False
+
+
+class OperatorSend(Model):
+    text:str=Field(min_length=1,max_length=300)
+    channel:Literal['sms','web']='sms'
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
                data_source: str | None = None, web_dist: Path | None = None,
@@ -145,6 +159,9 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.scout=Scout(database,app.state.tools,app.state.channels,app.state.warden)
         app.state.warden.on_call=app.state.scout.place_call
         app.state.field=FieldService(database,app.state.channels)
+        app.state.voice=VoiceService(database,app.state.tools,app.state.channels,app.state.warden,VoiceSettings.from_environment())
+        app.state.channels.outbound_policy=lambda responder,channel:sms_policy(database,app.state.tools,responder,channel,
+                                            datetime.fromtimestamp(app.state.voice.clock(),timezone.utc))
         app.state.brain = OfflineBrain()
         async def run_scout():
             while True:
@@ -169,6 +186,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     app.state.auth=OperatorAuth(AuthSettings.from_environment(),public_demo)
     app.state.public_demo = public_demo
     app.state.database_path = path
+    app.state.engine=engine
     app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
                             source=source, engine='deterministic', outbound='mock',
                             poll_ms=4000, field_poll_ms=3000, voice_available=False,scout_background=background_enabled)
@@ -203,7 +221,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
 
     @operator.get('/config')
     def config():
-        return app.state.config
+        return {**app.state.config,'outbound':'mock' if app.state.channels.settings.force_mock or public_demo else 'configured_only',
+                'voice_available':app.state.voice.ready(),'voice_mode':app.state.voice.mode()}
 
     @operator.get('/responders')
     def responders(village_id: str | None = None):
@@ -221,6 +240,25 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     @operator.get('/responders/{responder_id}/field-link')
     def field_link(responder_id:str):
         return {'field_path':app.state.field.link(responder_id)}
+
+    @operator.post('/responders/{responder_id}/send')
+    def operator_send(responder_id:str,body:OperatorSend):
+        status,context=app.state.voice._context(responder_id)
+        mock=app.state.channels.settings.public_demo or app.state.channels.settings.force_mock
+        policy_status=status if mock else app.state.tools.get_village_status(status.village_id,'live',0)
+        allowed,reason=decision('sms',policy_status.level,datetime.fromtimestamp(app.state.voice.clock(),timezone.utc))
+        if not allowed:
+            return {'message_id':None,'status':'suppressed','reason':reason}
+        with app.state.database.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            message_id=app.state.channels.enqueue(responder_id,body.text,body.channel,trace_id=context.get('trace_id'),connection=connection)
+        result=app.state.channels.dispatch(message_id)
+        record(app.state.database,'Warden','operator_message',trace_id=context.get('trace_id'),input={'responder_id':responder_id,'channel':body.channel},output=result)
+        return result
+
+    @operator.post('/voice/twilio/call')
+    def voice_call(body:VoiceCall):
+        return app.state.voice.call(body.responder_id,body.diagnostic,uat=body.uat)
 
     @operator.post('/demo/inbound')
     def demo_inbound(body: DemoInbound):
@@ -325,6 +363,40 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     @app.post('/api/field/{token}/send')
     def field_send(token:str,body:FieldSend):
         return app.state.field.send(token,body.text)
+
+    async def voice_callback(request:Request,kind:str):
+        raw_query=request.scope.get('query_string',b'')
+        path=request.scope['path']
+        signature=request.headers.get('X-Twilio-Signature')
+        raw=bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw)>65536:
+                raise HTTPException(413,'Voice payload too large')
+        try:
+            params=parse_qs(raw.decode('utf-8'),keep_blank_values=True,max_num_fields=80)
+        except (ValueError,UnicodeError):
+            raise HTTPException(422,'Invalid voice payload') from None
+        def process():
+            service=app.state.voice
+            sid,identity,query=service.authenticate(path,raw_query,params,signature)
+            if kind=='status':
+                return service.status(sid,identity,params)
+            xml=service.start(sid,identity) if kind=='start' else service.gather(sid,identity,query,params)
+            return Response(xml,media_type='application/xml')
+        return await asyncio.to_thread(process)
+
+    @app.post('/api/voice/twilio/twiml/start')
+    async def voice_start(request:Request):
+        return await voice_callback(request,'start')
+
+    @app.post('/api/voice/twilio/twiml/gather')
+    async def voice_gather(request:Request):
+        return await voice_callback(request,'gather')
+
+    @app.post('/api/voice/twilio/status')
+    async def voice_status(request:Request):
+        return await voice_callback(request,'status')
 
     @app.post('/api/channels/sms/inbound')
     async def sms_inbound(request: Request):

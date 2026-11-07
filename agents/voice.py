@@ -1,0 +1,376 @@
+"""Twilio TwiML test calls. No SDK, OpenAI, recordings, or implicit live mode."""
+import base64
+from dataclasses import dataclass,field
+from datetime import datetime,timezone
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+from threading import RLock
+import time
+from urllib.parse import parse_qs,urlencode,urlsplit
+import xml.etree.ElementTree as ET
+import httpx
+from fastapi import HTTPException
+from .channels import ChannelAdapter,ChannelUnavailable,Inbound
+from .contacts import normalize_phone
+from .db import Database,identifier
+from .events import record
+from .scout import reserve_call
+from .tools import ToolService
+from .warden import Warden,parse_report
+
+SID_TTL=15*60
+# Strong session capability, intentionally incompatible with the rehearsal plan:
+# v1.<base64url responder ID>.<UTC epoch seconds>.<128-bit hex nonce>.<purpose 0 normal|1 diag|2 UAT>.<full SHA256 HMAC>
+# MAC key = configured TWILIO_AUTH_TOKEN; message = "twilio-session:" + first five fields.
+# Valid for 15 minutes (+30s clock skew). Never print/store in trace or return in operator JSON.
+BYE=re.compile(r'\b(matiin|matikan|tutup|udahan|selesai|cukup|stop|goodbye|bye)\b',re.I)
+
+
+@dataclass(repr=False)
+class VoiceSettings:
+    account_sid:str=field(default='',repr=False)
+    auth_token:str=field(default='',repr=False)
+    from_number:str=field(default='',repr=False)
+    public_base_url:str=''
+    uat_phone:str=field(default='',repr=False)
+
+    @classmethod
+    def from_environment(cls):
+        return cls(**{name:os.environ.get(env,'') for name,env in {
+            'account_sid':'TWILIO_ACCOUNT_SID','auth_token':'TWILIO_AUTH_TOKEN','from_number':'TWILIO_FROM_NUMBER',
+            'public_base_url':'PUBLIC_BASE_URL','uat_phone':'UAT_PHONE_NUMBER'}.items()})
+
+    def base(self):
+        parts=urlsplit(self.public_base_url)
+        if parts.scheme!='https' or not parts.hostname or parts.username or parts.password or parts.query or parts.fragment or parts.path not in ('','/'):
+            raise ChannelUnavailable('Voice configuration unavailable')
+        return self.public_base_url.rstrip('/')
+
+    def validate(self):
+        self.base()
+        if not re.fullmatch(r'AC[0-9a-fA-F]{32}',self.account_sid) or not re.fullmatch(r'[0-9a-fA-F]{32}',self.auth_token):
+            raise ChannelUnavailable('Voice configuration unavailable')
+        try:
+            if normalize_phone(self.from_number)!=self.from_number or normalize_phone(self.uat_phone)!=self.uat_phone:
+                raise ValueError('Invalid voice contact')
+        except ValueError:
+            raise ChannelUnavailable('Voice configuration unavailable') from None
+
+
+def sign_session(settings:VoiceSettings,responder_id:str, *,diagnostic=False,uat=False,now=None):
+    if not re.fullmatch(r'[0-9a-fA-F]{32}',settings.auth_token) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',responder_id):
+        raise ChannelUnavailable('Voice session unavailable')
+    encoded=base64.urlsafe_b64encode(responder_id.encode()).decode().rstrip('=')
+    purpose='1' if diagnostic else '2' if uat else '0'
+    payload=f'v1.{encoded}.{int(time.time() if now is None else now)}.{secrets.token_hex(16)}.{purpose}'
+    mac=hmac.new(settings.auth_token.encode(),('twilio-session:'+payload).encode(),hashlib.sha256).hexdigest()
+    return payload+'.'+mac
+
+
+def verify_session(settings:VoiceSettings,sid:str, *,now=None):
+    if not re.fullmatch(r'[0-9a-fA-F]{32}',settings.auth_token) or len(sid)>300:
+        return None
+    parts=sid.split('.')
+    if len(parts)!=6 or parts[0]!='v1' or not re.fullmatch(r'[A-Za-z0-9_-]{1,110}',parts[1]) or not re.fullmatch(r'[0-9]{1,12}',parts[2]) or not re.fullmatch(r'[0-9a-f]{32}',parts[3]) or parts[4] not in ('0','1','2') or not re.fullmatch(r'[0-9a-f]{64}',parts[5]):
+        return None
+    age=(time.time() if now is None else now)-int(parts[2])
+    if age < -30 or age>SID_TTL:
+        return None
+    mac=hmac.new(settings.auth_token.encode(),('twilio-session:'+'.'.join(parts[:5])).encode(),hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(mac,parts[5]):
+        return None
+    try:
+        responder_id=base64.urlsafe_b64decode(parts[1]+'='*(-len(parts[1])%4)).decode()
+    except (ValueError,UnicodeError):
+        return None
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}',responder_id):
+        return None
+    return {'responder_id':responder_id,'diagnostic':parts[4]=='1','uat':parts[4]=='2','issued_at':int(parts[2])}
+
+
+def twilio_signature(auth_token:str,url:str,params:dict[str,list[str]]):
+    payload=url+''.join(key+value for key in sorted(params) for value in sorted(set(params[key])))
+    return base64.b64encode(hmac.new(auth_token.encode(),payload.encode(),hashlib.sha1).digest()).decode()
+
+
+def speech_text(text:str):
+    return text.replace('Balas YA','Jawab ya').replace('TIDAK','tidak').replace('YA','ya').replace(' cm',' sentimeter').replace('K4','kanal empat')
+
+
+def twiml(text:str,url:str|None=None, *,pause=False,diagnostic=False,hangup=False):
+    root=ET.Element('Response')
+    if pause:
+        ET.SubElement(root,'Pause',length='1')
+    parent=root
+    if not hangup:
+        parent=ET.SubElement(root,'Gather',input='speech',language='en-US' if diagnostic else 'id-ID',speechTimeout='auto',timeout='5',
+                             actionOnEmptyResult='true',action=url,method='POST',hints='air,asap,kanal,ya,tidak')
+    ET.SubElement(parent,'Say',voice='alice' if diagnostic else 'Google.id-ID-Standard-A',language='en-US' if diagnostic else 'id-ID').text=speech_text(text)
+    if hangup:
+        ET.SubElement(root,'Hangup')
+    else:
+        ET.SubElement(root,'Redirect',method='POST').text=url
+    return ET.tostring(root,encoding='unicode',xml_declaration=False)
+
+
+class VoiceService:
+    def __init__(self,database:Database,tools:ToolService,channels:ChannelAdapter,warden:Warden,settings:VoiceSettings, *,clock=time.time,transport=None):
+        self.db,self.tools,self.channels,self.warden,self.settings=database,tools,channels,warden,settings
+        self.clock,self.transport=clock,transport
+        self._lock=RLock()
+
+    def mode(self):
+        if self.channels.settings.public_demo or self.channels.settings.force_mock:
+            return 'mock'
+        return 'live' if self.ready() else 'unavailable'
+
+    def ready(self):
+        try:
+            if self.channels.settings.public_demo or self.channels.settings.force_mock:
+                return False
+            self.settings.validate()
+            contacts=self.channels.contacts()
+            responder=contacts.find(self.settings.uat_phone)
+            return responder is not None and contacts.phone_for(responder)==self.settings.uat_phone
+        except (ChannelUnavailable,ValueError):
+            return False
+
+    def _key(self,sid):
+        return 'voice-session:'+hashlib.sha256(sid.encode()).hexdigest()
+
+    def _context(self,responder_id):
+        with self.db.connect() as connection:
+            row=connection.execute('SELECT village_id FROM responders WHERE id=?',(responder_id,)).fetchone()
+        if not row:
+            raise KeyError('Unknown responder')
+        state=self.db.get('warden:'+responder_id,{})
+        mode,day=state.get('mode','live'),state.get('day',0)
+        return self.tools.get_village_status(row['village_id'],mode,day),state
+
+    def call(self,responder_id,diagnostic=False, *,uat=False):
+        if diagnostic and uat:
+            raise ValueError('Choose one test flow')
+        status,context=self._context(responder_id)
+        mock=self.channels.settings.public_demo or self.channels.settings.force_mock
+        # Replay is conversation context only. A real phone attempt always applies
+        # quiet/risk policy to CURRENT LIVE facts; only explicit chosen UAT/diag
+        # may bypass the risk threshold, never quiet hours or the call budget.
+        policy_status=status if mock else self.tools.get_village_status(status.village_id,'live',0)
+        phone=None
+        if not mock:
+            self.settings.validate()
+            phone=self.channels.contacts().phone_for(responder_id)
+            if not hmac.compare_digest(phone.encode(),self.settings.uat_phone.encode()):
+                raise ChannelUnavailable('Only the consented chosen test recipient is enabled')
+        if (diagnostic or uat) and mock:
+            # Diagnostic risk bypass is reserved for the actual chosen consenting UAT contact.
+            raise ChannelUnavailable('Diagnostic requires the chosen protected test recipient')
+        now=datetime.fromtimestamp(self.clock(),timezone.utc)
+        allowed,reason=reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock))
+        call_id=identifier('vc')
+        trace=context.get('trace_id') or identifier('t')
+        if not allowed:
+            record(self.db,'Scout','call_suppressed',trace_id=trace,input={'responder_id':responder_id,'level':policy_status.level,'mode':policy_status.mode,'day':policy_status.day},output={'reason':reason,'status':'suppressed'})
+            return {'call_id':None,'status':'suppressed','reason':reason}
+        if mock:
+            self.channels.record_voice(responder_id,'Simulasi permintaan panggilan uji coba Peatforge. Tidak ada telepon nyata.',trace_id=trace)
+            record(self.db,'Warden','call_mocked',trace_id=trace,input={'responder_id':responder_id,'mode':status.mode,'day':status.day},output={'call_id':call_id,'status':'mock'})
+            return {'call_id':call_id,'status':'mock'}
+        if not diagnostic:
+            self.warden.reset_for_alert(responder_id,status.mode,status.day,trace)
+        sid=sign_session(self.settings,responder_id,diagnostic=diagnostic,uat=uat,now=self.clock())
+        session={'responder_id':responder_id,'diagnostic':diagnostic,'uat':uat,'call_id':call_id,'trace_id':trace,'mode':status.mode,'day':status.day,
+                 'stage':'diagnostic' if diagnostic else 'wt','turn':0,'empty':0,'rounds':0,'report':{},'responses':{},'status':'dispatching'}
+        self.db.set(self._key(sid),session)
+        form={'To':phone,'From':self.settings.from_number,'Url':self.settings.base()+'/api/voice/twilio/twiml/start?'+urlencode({'sid':sid}),
+              'StatusCallback':self.settings.base()+'/api/voice/twilio/status?'+urlencode({'sid':sid})}
+        outcome='unknown'
+        try:
+            with httpx.Client(transport=self.transport,timeout=15,follow_redirects=False,trust_env=False,
+                              auth=(self.settings.account_sid,self.settings.auth_token)) as client:
+                response=client.post('https://api.twilio.com/2010-04-01/Accounts/'+self.settings.account_sid+'/Calls.json',data=form)
+                if response.status_code>=400:
+                    outcome='failed' if response.status_code<500 else 'unknown'
+                else:
+                    provider_id=response.json().get('sid','')
+                    if re.fullmatch(r'CA[0-9a-fA-F]{32}',provider_id):
+                        session['provider_hash']=hashlib.sha256(provider_id.encode()).hexdigest()
+                        outcome='queued'
+        except (httpx.HTTPError,ValueError,TypeError):
+            outcome='unknown'
+        # Merge a callback that may have arrived before the REST response.
+        with self._lock:
+            current=self.db.get(self._key(sid),session)
+            current.update(status=outcome)
+            if session.get('provider_hash'):
+                current['provider_hash']=session['provider_hash']
+            self.db.set(self._key(sid),current)
+        record(self.db,'Warden','call_requested',trace_id=trace,input={'responder_id':responder_id,'mode':status.mode,'day':status.day,'policy_level':policy_status.level,'diagnostic':diagnostic,'uat':uat},
+               output={'call_id':call_id,'status':outcome})
+        return {'call_id':call_id,'status':outcome}
+
+    def authenticate(self,path,raw_query,params,signature):
+        try:
+            query=parse_qs(raw_query.decode('ascii'),keep_blank_values=True,max_num_fields=10)
+            sid=query.get('sid',[])
+            if len(sid)!=1:
+                raise ValueError('Invalid session')
+            identity=verify_session(self.settings,sid[0],now=self.clock())
+            if not identity:
+                raise ValueError('Invalid session')
+            public_url=self.settings.base()+path+('?' + raw_query.decode('ascii') if raw_query else '')
+            if signature is not None:
+                expected=twilio_signature(self.settings.auth_token,public_url,params)
+                if not hmac.compare_digest(expected.encode(),signature.encode()):
+                    raise ValueError('Invalid signature')
+            if params.get('AccountSid') and params['AccountSid']!=[self.settings.account_sid]:
+                raise ValueError('Account scope mismatch')
+            existing=self.db.get(self._key(sid[0]),{})
+            if existing.get('provider_hash'):
+                provider=params.get('CallSid',[''])[0]
+                if hashlib.sha256(provider.encode()).hexdigest()!=existing['provider_hash']:
+                    raise ValueError('Call scope mismatch')
+            with self.db.connect() as connection:
+                if not connection.execute('SELECT 1 FROM responders WHERE id=?',(identity['responder_id'],)).fetchone():
+                    raise ValueError('Unknown session')
+            return sid[0],identity,query
+        except (ValueError,UnicodeError,ChannelUnavailable):
+            raise HTTPException(403,'Voice webhook authentication required') from None
+
+    def _session(self,sid,identity):
+        session=self.db.get(self._key(sid))
+        if session is None:
+            # Strong SID is verifiable in any process; persisted context is preferred.
+            status,context=self._context(identity['responder_id'])
+            session={'responder_id':identity['responder_id'],'diagnostic':identity['diagnostic'],'uat':identity.get('uat',False),'call_id':identifier('vc'),
+                     'trace_id':context.get('trace_id') or identifier('t'),'mode':status.mode,'day':status.day,'stage':'diagnostic' if identity['diagnostic'] else 'wt',
+                     'turn':0,'empty':0,'rounds':0,'report':{},'responses':{}}
+        return session
+
+    def _render(self,sid,session,response,pause=False):
+        url=self.settings.base()+'/api/voice/twilio/twiml/gather?'+urlencode({'sid':sid,'turn':response.get('next_turn',session['turn'])})
+        return twiml(response['text'],url,pause=pause,diagnostic=session['diagnostic'],hangup=response.get('hangup',False))
+
+    def start(self,sid,identity):
+        with self._lock:
+            session=self._session(sid,identity)
+            text=('This is a consenting Peatforge test call. Please say a short sentence.' if session['diagnostic'] else
+                  'Halo, ini uji coba Peatforge. Berapa kedalaman air dari permukaan gambut, dalam sentimeter?')
+            if session.get('last_response'):
+                return self._render(sid,session,session['last_response'],pause=True)
+            self.channels.record_voice(session['responder_id'],text,speech=text,trace_id=session['trace_id'],idempotency_key='m_voice_start_'+hashlib.sha256(sid.encode()).hexdigest())
+            self.db.set(self._key(sid),session)
+            return self._render(sid,session,{'text':text},pause=True)
+
+    def gather(self,sid,identity,query,params):
+        with self._lock:
+            session=self._session(sid,identity)
+            self.db.set('scout:active-context',{'mode':session['mode'],'day':session['day'],'updated_at':self.clock()})
+            try:
+                values=query.get('turn',[])
+                if len(values)!=1 or not re.fullmatch(r'[0-9]{1,2}',values[0]):
+                    raise ValueError('Invalid turn')
+                turn=int(values[0])
+            except ValueError:
+                raise HTTPException(403,'Invalid voice turn') from None
+            if str(turn) in session['responses']:
+                return self._render(sid,session,session['responses'][str(turn)])
+            if session.get('ended'):
+                return self._render(sid,session,session['last_response'])
+            if turn!=session['turn']:
+                raise HTTPException(409,'Voice turn is stale')
+            speech=params.get('SpeechResult',[''])[0].strip()
+            if len(speech)>500:
+                raise HTTPException(422,'Speech too long')
+            digest=hashlib.sha256(sid.encode()).hexdigest()
+            if speech:
+                self.channels.record_voice(session['responder_id'],speech,direction='inbound',trace_id=session['trace_id'],idempotency_key=f'm_voice_raw_{digest}_{turn}')
+            response=self._turn(session,speech,digest,turn)
+            response['next_turn']=turn+1
+            session['turn']=turn+1
+            session['responses'][str(turn)]=response
+            session['last_response']=response
+            session['ended']=response.get('hangup',False)
+            self.db.set(self._key(sid),session)
+            if response.get('message_id'):
+                with self.db.connect() as connection:
+                    connection.execute('UPDATE messages SET body=?,speech=? WHERE id=?',(response['text'],speech_text(response['text']),response['message_id']))
+            else:
+                self.channels.record_voice(session['responder_id'],response['text'],speech=speech_text(response['text']),trace_id=session['trace_id'],idempotency_key=f'm_voice_out_{digest}_{turn}')
+            return self._render(sid,session,response)
+
+    def _turn(self,session,speech,digest,turn):
+        if BYE.search(speech):
+            return {'text':'Terima kasih sudah mengikuti uji coba Peatforge. Sampai jumpa.','hangup':True}
+        if not speech:
+            session['empty']+=1
+            return {'text':'Terima kasih. Panggilan uji coba diakhiri.' if session['empty']>=3 else 'Suara belum terdengar. Mohon jawab pertanyaan tadi.', 'hangup':session['empty']>=3}
+        session['empty']=0
+        if session['diagnostic']:
+            session['rounds']+=1
+            return {'text':'Thank you. The Peatforge test call is complete.' if session['rounds']>=5 else 'Thank you. Please say another short sentence.', 'hangup':session['rounds']>=5}
+        if turn>=20:
+            return {'text':'Terima kasih. Silakan melanjutkan laporan lewat pesan.','hangup':True}
+        stage=session['stage']
+        report=session['report']
+        if stage=='confirm':
+            result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text=speech,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:confirm:{turn}')
+            outgoing=[item for item in result.get('items',[]) if item['direction']=='outbound' and item['channel']=='voice']
+            reply=outgoing[-1] if outgoing else None
+            if result.get('state')=='saved':
+                return {'text':reply['body'] if reply else 'Terima kasih. Laporan dicatat untuk ditinjau petugas.','hangup':True,'message_id':reply['id'] if reply else None}
+            if result.get('state')=='idle':
+                session.update(stage='wt',report={})
+                return {'text':'Baik, laporan belum disimpan. Berapa kedalaman air dalam sentimeter?'}
+            return {'text':reply['body'] if reply else 'Apakah pembacaan ulang benar? Jawab ya untuk menyimpan, atau tidak untuk koreksi.','message_id':reply['id'] if reply else None}
+        if stage=='wt':
+            facts,clarify=parse_report(speech if re.search(r'\bair\b',speech,re.I) else 'AIR '+speech)
+            if clarify or not facts or facts.get('wt_cm') is None:
+                return {'text':'Mohon perjelas kedalaman air dalam sentimeter. Lima meter dan lima puluh sentimeter berbeda. Laporan belum disimpan.'}
+            report.update(facts)
+            session['stage']='smoke'
+            return {'text':'Apakah ada asap di sekitar lokasi? Jawab ada atau tidak.'}
+        if stage=='smoke':
+            value=speech.strip().lower().strip('.!?')
+            if value in ('ya','iya','ada'):
+                report['smoke']=True
+            elif value in ('tidak','nggak','tidak ada','nggak ada'):
+                report['smoke']=False
+            else:
+                facts,clarify=parse_report(speech)
+                if clarify or not facts or facts.get('smoke') is None:
+                    return {'text':'Apakah ada asap? Jawab ada atau tidak.'}
+                report['smoke']=facts['smoke']
+            session['stage']='landmark'
+            return {'text':'Lokasinya dekat kanal atau sumur yang mana?'}
+        with self.db.connect() as connection:
+            village=connection.execute('SELECT village_id FROM responders WHERE id=?',(session['responder_id'],)).fetchone()['village_id']
+        landmark=self.tools.resolve_landmark(village,speech)
+        if not landmark.landmark_id:
+            return {'text':'Mohon sebut kanal atau sumur yang dikenali, misalnya kanal empat.'}
+        text=f"AIR {report['wt_cm']:g} ASAP {'YA' if report['smoke'] else 'TIDAK'} dekat {landmark.landmark_id}"
+        result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text=text,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:report')
+        session['stage']='confirm'
+        outgoing=[item for item in result.get('items',[]) if item['direction']=='outbound' and item['channel']=='voice']
+        return {'text':speech_text(outgoing[-1]['body']) if outgoing else 'Mohon konfirmasi laporan dengan menjawab ya atau tidak.','message_id':outgoing[-1]['id'] if outgoing else None}
+
+    def status(self,sid,identity,params):
+        value=params.get('CallStatus',[''])[0]
+        if value not in ('queued','initiated','ringing','in-progress','completed','busy','failed','no-answer','canceled'):
+            raise HTTPException(422,'Invalid call status')
+        duration=params.get('CallDuration',[''])[0]
+        seconds=int(duration) if re.fullmatch(r'[0-9]{1,5}',duration) and int(duration)<=86400 else None
+        with self._lock:
+            session=self._session(sid,identity)
+            provider=params.get('CallSid',[''])[0]
+            if session.get('provider_hash') and (not provider or hashlib.sha256(provider.encode()).hexdigest()!=session['provider_hash']):
+                raise HTTPException(403,'Call scope mismatch')
+            session['provider_status']=value
+            self.db.set(self._key(sid),session)
+            record(self.db,'Warden','call_status',trace_id=session['trace_id'],input={'call_id':session['call_id'],'responder_id':session['responder_id']},
+                   output={'status':value,'duration_seconds':seconds},event_id='e_voice_status_'+hashlib.sha256(sid.encode()).hexdigest()+'_'+value+'_'+str(seconds))
+        return {'accepted':True}

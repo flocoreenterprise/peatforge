@@ -164,8 +164,6 @@ class Planner:
                 'hidden_count': 0 if include_old else len(hidden)}
 
     def transition(self, action_id: str, operation: str, note: str = '') -> dict:
-        if not (self.channels.settings.public_demo or self.channels.settings.force_mock):
-            raise ChannelUnavailable('Approval delivery is mock-only until protected operation is implemented')
         with self._lock, self.db.connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
             self.expire(connection)
@@ -174,28 +172,42 @@ class Planner:
                 raise KeyError('Unknown action')
             action = self._action(row)
             target = {'approve':'approved','reject':'rejected','complete':'done'}[operation]
-            if row['status'] == target or operation == 'approve' and row['status'] == 'done':
-                return action
-            if row['status'] != ('approved' if operation == 'complete' else 'proposed'):
+            duplicate=row['status']==target or operation=='approve' and row['status']=='done'
+            if not duplicate and row['status'] != ('approved' if operation == 'complete' else 'proposed'):
                 raise HTTPException(409, 'Action cannot change from current status')
-            action.update(status=target, approved_by='demo_operator' if operation == 'approve' else row['approved_by'])
-            action[operation + '_note'] = note
+            if not duplicate:
+                action.update(status=target,approved_by=('demo_operator' if self.channels.settings.public_demo else 'operator') if operation=='approve' else row['approved_by'])
+                action[operation+'_note']=note
             if operation == 'approve':
                 text = followup_text(action)
                 if len(text) > 300:
                     raise ValueError('Follow-up exceeds message limit')
                 followup_id = 'm_followup_' + action_id
-                connection.execute('INSERT OR IGNORE INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
-                    (followup_id, action['responder_id'], 'outbound', 'sms', text, None, 'mock', action['trace_id'], self._now()))
+                self.channels.enqueue(action['responder_id'],text,'sms',trace_id=action['trace_id'],idempotency_key=followup_id,connection=connection)
                 action['followup_message_id'] = followup_id
             connection.execute('UPDATE actions SET status=?,approved_by=?,data=? WHERE id=?',
-                               (target, action['approved_by'], json.dumps(action, allow_nan=False), action_id))
-            record(self.db,'Operator',target,trace_id=action['trace_id'],input={'action_id':action_id,'mode':action['mode'],'day':action['day']},
-                   output={'status':target},event_id='e_operator_'+operation+'_'+action_id,connection=connection)
-            if operation=='approve':
-                record(self.db,'Warden','followup_sent',trace_id=action['trace_id'],input={'action_id':action_id,'responder_id':action['responder_id']},
-                       output={'message_id':action['followup_message_id'],'status':'mock'},event_id='e_followup_'+action_id,connection=connection)
-            return action
+                               (action['status'], action['approved_by'], json.dumps(action, allow_nan=False), action_id))
+            if not duplicate:
+                record(self.db,'Operator',target,trace_id=action['trace_id'],input={'action_id':action_id,'mode':action['mode'],'day':action['day']},
+                       output={'status':target},event_id='e_operator_'+operation+'_'+action_id,connection=connection)
+        # Reservation and provider POST occur AFTER the approval/outbox transaction.
+        # dispatch() never retries ambiguous/failed attempts, even across processes.
+        if operation=='approve':
+            delivery=self.channels.dispatch(action['followup_message_id'])
+            action['followup_status']=delivery['status']
+            with self.db.connect() as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                latest=connection.execute('SELECT * FROM actions WHERE id=?',(action_id,)).fetchone()
+                action=self._action(latest)
+                actual=connection.execute('SELECT status FROM messages WHERE id=?',(action['followup_message_id'],)).fetchone()['status']
+                action['followup_status']=actual
+                delivery['status']=actual
+                connection.execute('UPDATE actions SET data=? WHERE id=?',(json.dumps(action,allow_nan=False),action_id))
+                success=actual in ('mock','queued','sent','delivered')
+                record(self.db,'Warden','followup_sent' if success else 'followup_unconfirmed',trace_id=action['trace_id'],
+                       input={'action_id':action_id,'responder_id':action['responder_id']},output=delivery,
+                       event_id='e_followup_'+action_id+'_'+actual,connection=connection)
+        return action
 
     def progress(self, responder_id: str) -> dict:
         state = self.db.get('warden:' + responder_id, {})
@@ -204,7 +216,7 @@ class Planner:
                 raise KeyError('Unknown responder')
             observation = connection.execute('SELECT id FROM observations WHERE responder_id=? AND id=?', (responder_id,state.get('observation_id'))).fetchone()
             action = connection.execute('SELECT * FROM actions WHERE observation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', (observation['id'] if observation else None,)).fetchone()
-            followup = connection.execute('SELECT id FROM messages WHERE id=?', ('m_followup_'+action['id'] if action else None,)).fetchone()
+            followup = connection.execute("SELECT id FROM messages WHERE id=? AND status IN ('mock','queued','sent','delivered')", ('m_followup_'+action['id'] if action else None,)).fetchone()
             counts = {table: connection.execute(f'SELECT COUNT(*) AS n FROM {table} WHERE responder_id=?', (responder_id,)).fetchone()['n'] for table in ('messages','observations','actions')}
         done = [bool(state.get('trace_id')), bool(observation), bool(action), bool(action and action['status'] in ('approved','done')), bool(followup)]
         return {'responder_id': responder_id, 'state': state.get('state','idle'), 'mode': state.get('mode','live'), 'day': state.get('day',0),

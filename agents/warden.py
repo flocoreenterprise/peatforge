@@ -150,7 +150,11 @@ class Warden:
         return self._reply(message, state, 'Terima kasih. Laporan terkonfirmasi telah dicatat untuk ditinjau petugas.', observation_id=saved['observation_id'])
 
     def _reply(self, message: Inbound, state: dict, text: str, *, event='reply', **extra) -> dict:
-        sent=self.channels.send(message.responder_id, text, message.channel if message.channel in ('sms', 'web') else 'web', trace_id=state.get('trace_id'))
+        receipt='m_reply_'+message.processing_id+'_'+event if message.processing_id else None
+        if message.channel=='voice':
+            sent=self.channels.record_voice(message.responder_id,text,speech=text,trace_id=state.get('trace_id'),idempotency_key=receipt)
+        else:
+            sent=self.channels.send(message.responder_id,text,message.channel if message.channel in ('sms','web') else 'web',trace_id=state.get('trace_id'),idempotency_key=receipt,reply_exempt=True)
         record(self.db,'Warden',event,trace_id=state.get('trace_id'),
                input={'responder_id':message.responder_id,'mode':state.get('mode','live'),'day':state.get('day',0)},
                output={'state':state['state'],'message_id':sent['message_id']})

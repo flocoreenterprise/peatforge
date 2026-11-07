@@ -20,3 +20,15 @@ assert.match(format({ ...base, benefit: { wt_gain_cm: 0, pfvi_reduction: 7 } }),
 assert.doesNotMatch(format({ ...base, days_bought: 0 }), /aman/);
 console.log('PASS: 7 benefit formatter assertions; no API mutation');
 
+const deliverySource = readFileSync(new URL('./delivery.ts', import.meta.url), 'utf8');
+const deliveryContext = { exports: {} };
+vm.runInNewContext(ts.transpileModule(deliverySource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, deliveryContext);
+const delivery = deliveryContext.exports.deliveryLabel;
+assert.match(delivery('failed'), /gagal/);
+assert.match(delivery('suppressed'), /Ditahan/);
+assert.match(delivery('unknown'), /belum diketahui/);
+assert.match(delivery('queued'), /belum diterima/);
+assert.match(delivery('delivered'), /Penerimaan dikonfirmasi/);
+assert.match(delivery(undefined), /belum tersedia/);
+assert.match(delivery('mock'), /tidak dikirim nyata/);
+console.log('PASS: 7 delivery-status assertions; no channel calls');

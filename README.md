@@ -18,6 +18,40 @@ If credentials are needed later, use only `scripts/set-secrets.ps1`; never paste
 Protected mode now requires the configured PIN and session secret. Public demo remains the default.
 Real SMS/phone delivery requires a separate explicit flag and recipient setup; it has not been tested live.
 
+## Scheduled SMS/phone UAT
+
+Only enter configuration through `scripts/set-secrets.ps1 -Name ...`. For protected UAT, set
+`PUBLIC_DEMO=false`, `PEATFORGE_LIVE_CHANNELS=true`, a six-digit `DEMO_PIN`, `SESSION_SECRET`,
+`CONTACT_ENCRYPTION_KEY`, `PHONE_HASH_SALT`, and the consenting Telkomsel receiver as `UAT_PHONE_NUMBER`.
+The secret setup accepts `!generate` for the three local cryptographic keys, without printing them.
+Phone needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, and `PUBLIC_BASE_URL`
+set to the active HTTPS tunnel origin. TwiML uses no OpenAI key.
+
+SMS uses a separate gateway: `SMS_GATEWAY_URL`, `SMS_GATEWAY_USER`, `SMS_GATEWAY_PASS`,
+`SMS_WEBHOOK_SECRET` (use `!generate`), and optionally `SMS_SIGNING_KEY` if the gateway signs callbacks.
+The gateway must be reachable from this server. Its credentials are not Twilio voice credentials.
+
+After the chosen receiver consents and configuration is stored:
+
+```powershell
+& .\scripts\uat.ps1 -Action Prepare -Consent
+& .\scripts\uat.ps1 -Action Check
+# Restart scripts/start.ps1 to apply the stored configuration to the server.
+# Only when beginning the agreed physical UAT:
+& .\scripts\uat.ps1 -Action RegisterSms
+& .\scripts\uat.ps1 -Action Sms -Text 'Uji coba Peatforge. Balas AIR dalam cm dan ASAP YA atau TIDAK dekat kanal 4.'
+& .\scripts\uat.ps1 -Action Call
+```
+
+`Check` only checks voice configuration/contact readiness; it does not contact a provider or prove delivery.
+`Prepare` stores the consenting contact locally. `RegisterSms`, `Sms` and `Call` have real external effects
+when protected live channels are configured; do not run them as routine build checks.
+The normal Indonesian Warden UAT explicitly bypasses the risk threshold for the chosen receiver only;
+quiet hours, cooldown and the hard one-call-per-WIB-day cap remain. A diagnostic call also consumes that cap.
+Provider acceptance means queued, not answered or delivered. Failed/unknown sends are never automatically retried.
+For SMS, confirm the readback with a separate YA, approve the resulting proposal, and verify the follow-up
+on the physical receiver. For voice, report depth, smoke and landmark, then confirm the readback separately.
+
 ## Demo
 
 1. Select Talio, Replay 2019, day9 (24 June). Village detail shows actual cached weather model output.
@@ -51,7 +85,7 @@ npm.cmd run build
 node src/inbox/benefit.test.mjs
 ```
 
-Latest root suite:133 passed +33 subtests; web build PASS; benefit7 and field-link13 assertions PASS.
+Latest root suite:162 passed +37 subtests; web build PASS; benefit/delivery/field-link and QA presentation/cache/milestone checks PASS.
 Manual cloud test passed the complete mocked SMS loop including1day proposal and one follow-up.
-Security found noP0/P1 within public-demo scope. Scheduled audits and final screenshots remain separate checks.
+Security review found a quiet-hours follow-up gap; it was fixed and regression-tested. Live Twilio policy now uses current live risk even when the conversation is a replay. Provider and microphone UAT remain untested.
 Read AGENTS.md and CONTRACT.md before edits; contract includes planned routes, while OpenAPI lists implemented routes.

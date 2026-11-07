@@ -63,15 +63,19 @@ Changes require orchestrator agreement. Phase 2 has been authorized by the user'
   Do not log query strings/tokens. Dedupe messageId; return 2xx quickly. Unset webhook secret rejects.
 - Telegram optional: required X-Telegram-Bot-Api-Secret-Token. Unconfigured rejects.
 - Twilio checks X-Twilio-Signature against full PUBLIC_BASE_URL request URL + sorted form params. Wrong signature always 403.
-  Missing signature accepted only with valid signed sid; fail closed without token. Sid `<rid>-<nonce8hex><hmac8hex>`;
-  HMAC-SHA256(TWILIO_AUTH_TOKEN, `sid:<rid>:<nonce>`) first 8 hex per requested B6a; short MAC is demo-only risk to report.
+  Missing signature accepted only with a valid signed sid; fail closed without token. Sid uses version, encoded responder,
+  issued time, 128-bit nonce, diagnostic flag and full HMAC-SHA256, with a 15-minute lifetime. Legacy short MACs are rejected.
 - No full phone numbers or raw secrets in logs/HTTP errors/trace. Encrypt contacts, hash with salt, display last four only.
 - All credentials entered through scripts/set-secrets.ps1. Public UI never gets provider keys.
 - Outbound channels in mock mode unless configured. Fixture simulation is explicitly labelled; 401 never activates mocks.
 - LLMs only rewrite wording. Reject changed numeric tokens, URLs or excessive length; offline templates are default/fallback.
-- Quiet hours 21:00-05:00 WIB except EKSTREM; voice TINGGI+ only; max one call/responder/day except EKSTREM;
+- Quiet hours 21:00-05:00 WIB except EKSTREM; voice TINGGI+ only; hard max one call/responder/WIB day including EKSTREM and diagnostic;
   hard 30 s call cooldown applies always. Field missions require human approval.
 - `hour_override` and level override are replay/mock demo only. They cannot bypass live channel policy.
+- Explicit `uat:true` permits a normal Warden test at low model risk only for the chosen consenting protected recipient.
+  It does not bypass quiet hours, cooldown or the hard daily call cap; diagnostic also consumes that cap.
+- Delivery status is independent of action approval. An ambiguous provider result is never automatically retried.
+  `Action.followup_status` and message status report mock/queued/failed/unknown/suppressed rather than claiming delivery.
 
 ## Canonical REST endpoints
 
@@ -123,7 +127,7 @@ Example objects referenced below are defined next. Routes marked optional are cu
 | POST /api/field/{token}/voice-session | F | {} | 503 offline; otherwise ephemeral client secret, never long-lived key (optional B6) |
 | POST /api/field/{token}/tools | F | {"name":"get_village_status","arguments":{}} | Status; responder forced from token, allowlisted tools only (optional B6) |
 | POST /api/voice/session | O | {"responder_id":"r1"} | 503 offline or scoped ephemeral session (optional blueprint alias) |
-| POST /api/voice/twilio/call | O | {"responder_id":"r1","diagnostic":false} | {"call_id":"<provider-id>","status":"queued"} |
+| POST /api/voice/twilio/call | O | {"responder_id":"r1","diagnostic":false,"uat":false} | {"call_id":"<opaque-internal-id>","status":"queued"}; mock/suppressed/unknown/failed also possible |
 | POST /api/voice/twilio/twiml/start | S | sid query + Twilio form | application/xml Response: Pause then greeting inside Gather |
 | POST /api/voice/twilio/twiml/gather | S | sid query + SpeechResult form | application/xml readback/Gather/Hangup |
 | POST /api/voice/twilio/status | S | sid query + CallStatus/CallDuration | {"accepted":true} |

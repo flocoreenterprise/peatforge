@@ -2,9 +2,12 @@
 import argparse
 from getpass import getpass
 import sqlite3
+from datetime import datetime,timezone
 from .app import _database_scope, create_app
 from .channels import ChannelAdapter, ChannelSettings, ChannelUnavailable
 from .db import Database
+from .tools import ToolService
+from .scout import sms_policy
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,8 +32,10 @@ def main(argv: list[str] | None = None) -> int:
         database.initialize()
         _database_scope(database, app.state.public_demo)
         adapter = ChannelAdapter(database, settings)
+        tools=ToolService(database,mock=app.state.public_demo,engine=app.state.engine)
+        adapter.outbound_policy=lambda responder,channel:sms_policy(database,tools,responder,channel,datetime.now(timezone.utc))
         if args.command == 'check':
-            if app.state.public_demo:
+            if settings.public_demo or settings.force_mock:
                 print('mock: public demo; no provider check performed')
             else:
                 adapter.gateway.check()
@@ -41,8 +46,12 @@ def main(argv: list[str] | None = None) -> int:
             adapter.contacts().bind(args.responder, getpass('Phone (hidden): '), consent=True)
             print('contact stored')
         elif args.command == 'send':
-            adapter.send(args.responder, args.text)
-            print('queued; delivery not confirmed')
+            with database.connect() as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                message_id=adapter.enqueue(args.responder,args.text,'sms',connection=connection)
+            result=adapter.dispatch(message_id)
+            print(result['status']+'; delivery not confirmed')
+            return 0 if result['status'] in ('mock','queued','sent','delivered') else 1
         elif args.command == 'register-webhook':
             adapter.gateway.register_webhook(args.url)
             print('webhook registered')

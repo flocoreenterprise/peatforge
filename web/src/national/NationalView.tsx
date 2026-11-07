@@ -53,7 +53,7 @@ export default function NationalView() {
         {provinces.length ? <ol>{(expanded ? provinces : provinces.slice(0, 6)).map(([province, detections]) => <li key={province}><span>{province}</span><strong>{count(detections)} <small>deteksi</small></strong></li>)}</ol> : <p>Belum ada rincian provinsi dalam data ini. Ketiadaan deteksi bukan bukti wilayah aman.</p>}
         {provinces.length > 6 && <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Tampilkan enam teratas' : 'Lihat semua provinsi'}</button>}
       </section>
-      <details><summary>Cakupan dan sumber data</summary><p>Batas administratif yang digunakan: {count(snapshot.coverage.units)} provinsi, tahun {snapshot.coverage.boundary_year}. Batas lama ini tidak mewakili pembagian 38 provinsi saat ini.</p>
+      <details><summary>Cakupan dan sumber data</summary><p>Batas administratif yang digunakan: {count(snapshot.coverage.units)} provinsi, tahun {snapshot.coverage.boundary_year}. Batas lama ini tidak mewakili pembagian provinsi terkini.</p>
         <p>Deteksi dalam wilayah pengambilan regional: {count(snapshot.regional_total)}. Deteksi regional yang tidak cocok dengan batas Indonesia: {count(snapshot.unmatched_regional_count)}; angka tersebut bukan jumlah kebakaran Indonesia.</p>
         <p>Sumber deteksi: {snapshot.source}. Waktu data: {date(snapshot.data_as_of)}.</p>
         <p>Batas wilayah: <a href="https://www.geoboundaries.org/countryDownloads.html" target="_blank" rel="noopener noreferrer">geoBoundaries / OpenStreetMap · ODbL 1.0</a>.</p>

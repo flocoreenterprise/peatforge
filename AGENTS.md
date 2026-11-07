@@ -95,3 +95,13 @@ Hard rules:
 - At12:30 report readiness for realSMS/phone UAT; user enterskeys onlythroughset-secrets.ps1. Freeze13:00.
 - A6 replay still skipsrecalibration perprompt; keep pre-update discrepancy. Singleobservation assimilation is not independent field calibration.
 - A7/3D/Telegram/Realtime/askbar remaincut. C7limitedcounts only, no nationwide peat-risk claims.
+
+## QA gate and browser voice — latest team-lead override
+- Five independent QA fixes committed in order: Scout demo banner, current WT criticality versus PFVI, honest hydraulic assumptions, input-based simulation cache, computed replay jumps/default.
+- No real SMS/calls/provider requests, tunnels, secret changes or push while unattended. Existing tunnel stopped; continue local verification until attended UAT.
+- B6 browser OpenAI Realtime is now explicitly authorized after those five commits, Sol medium, agents/ and web/src/voice/ ownership; root wires shared components.
+- User will enter OPENAI_API_KEY via set-secrets.ps1; do not ask to paste it or create/reuse a key. Offline tests only until user begins live UAT.
+- Defaults OPENAI_REALTIME_MODEL=gpt-realtime-2.1 and OPENAI_REALTIME_VOICE=marin. Ephemeral browser secret only; never expose/log the master key.
+- Operator auth or responder field-token scope; tools force identity and reuse SMS parser/readback/plausibility/Verifier. Five session requests/minute/token.
+- Browser voice is user-initiated; no autonomous real browser/provider calls. SMS/Twilio remain governed separately by protected live-channel gates.
+- At12:45 if browser voice is not green keep it behind clearly labelled Simulasi fallback. Feature freeze13:00 unchanged.

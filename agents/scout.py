@@ -1,6 +1,7 @@
 """Persisted risk crossings and deterministic autonomy, always mock delivery here."""
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from threading import RLock
 from engine.cache import DataUnavailable
 from .channels import ChannelAdapter, ChannelUnavailable
@@ -17,7 +18,7 @@ POLICY={'max_calls_per_day':1,'quiet_hours':[21,5],'timezone':'Asia/Jakarta',
 
 
 def decision(channel: str, level: str, now: datetime, *, calls_today: int = 0,
-             last_call: float | None = None, hour_override: int | None = None) -> tuple[bool,str]:
+             last_call: float | None = None, hour_override: int | None = None,risk_override:bool=False) -> tuple[bool,str]:
     if level not in LEVELS or channel not in ('sms','voice'):
         raise ValueError('Invalid policy context')
     hour=now.astimezone(WIB).hour if hour_override is None else hour_override
@@ -26,13 +27,40 @@ def decision(channel: str, level: str, now: datetime, *, calls_today: int = 0,
     if (hour>=21 or hour<5) and level!='EKSTREM':
         return False,'quiet_hours'
     if channel=='voice':
-        if LEVELS[level]<LEVELS['TINGGI']:
+        if LEVELS[level]<LEVELS['TINGGI'] and not risk_override:
             return False,'voice_below_high'
         if last_call is not None and now.timestamp()-last_call<30:
             return False,'call_cooldown'
         if calls_today>=1:
             return False,'daily_call_limit'
     return True,'allowed'
+
+
+def reserve_call(database:Database,responder_id:str,level:str,now:datetime, *,risk_override:bool=False):
+    """Reserve the hard daily attempt budget before any provider POST, across processes."""
+    key='call-policy:'+responder_id
+    today=now.astimezone(WIB).date().isoformat()
+    with database.connect() as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        row=connection.execute('SELECT value FROM kv WHERE key=?',(key,)).fetchone()
+        state=json.loads(row['value']) if row else {}
+        count=state.get('count',0) if state.get('date')==today else 0
+        allowed,reason=decision('voice',level,now,calls_today=count,last_call=state.get('last_call'),risk_override=risk_override)
+        if allowed:
+            value=json.dumps({'date':today,'count':count+1,'last_call':now.timestamp()})
+            connection.execute('INSERT INTO kv(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,value))
+    return allowed,reason
+
+
+def sms_policy(database:Database,tools:ToolService,responder_id:str,channel:str,now:datetime):
+    if channel!='sms':
+        return True,'allowed'
+    with database.connect() as connection:
+        row=connection.execute('SELECT village_id FROM responders WHERE id=?',(responder_id,)).fetchone()
+    if not row:
+        raise KeyError('Unknown responder')
+    status=tools.get_village_status(row['village_id'],'live',0)
+    return decision('sms',status.level,now)
 
 
 class Scout:
@@ -175,17 +203,13 @@ class Scout:
             if not row:
                 raise KeyError('Unknown responder')
             status=self.tools.get_village_status(row['village_id'],mode,day)
-            state=self.db.get('call-policy:'+responder_id,{})
             now=self.clock()
-            today=now.astimezone(WIB).date().isoformat()
-            count=state.get('count',0) if state.get('date')==today else 0
-            allowed,reason=decision('voice',status.level,now,calls_today=count,last_call=state.get('last_call'))
+            allowed,reason=reserve_call(self.db,responder_id,status.level,now)
             trace=self.db.get('warden:'+responder_id,{}).get('trace_id') or identifier('t')
             if not allowed:
                 record(self.db,'Scout','call_suppressed',trace_id=trace,input={'responder_id':responder_id,'mode':mode,'day':day,'level':status.level},output={'reason':reason,'decision':'suppress'})
                 return {'call_id':None,'status':'suppressed','reason':reason}
             call_id=identifier('call')
             self.channels.send(responder_id,'Simulasi panggilan Warden. Tidak ada panggilan telepon nyata.','voice',trace_id=trace,mock_only=True)
-            self.db.set('call-policy:'+responder_id,{'date':today,'count':count+1,'last_call':now.timestamp()})
             record(self.db,'Scout','call_mocked',trace_id=trace,input={'responder_id':responder_id,'mode':mode,'day':day,'level':status.level},output={'call_id':call_id,'status':'mock','mock':True})
             return {'call_id':call_id,'status':'mock','reason':'allowed'}
