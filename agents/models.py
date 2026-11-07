@@ -44,7 +44,7 @@ class SimulationRequest(Model):
     type: Literal['canal_block', 'pump_standby', 'dispatch_verify']
     targets: list[str] = Field(min_length=1)
     delta_hc_cm: float | None = Field(default=None, ge=0, le=150)
-    days: int = Field(default=14, ge=1, le=90)
+    days: int = Field(default=14, ge=1, le=14)
     mode: Mode = 'live'
     day: int = Field(default=0, ge=0, le=61)
 
@@ -60,6 +60,7 @@ class Simulation(Model):
     curve_baseline: list[dict[str, Any]]
     curve_scenario: list[dict[str, Any]]
     assumptions: list[str]
+    model_setup: dict[str, Any] | None = None
 
 
 class ObservationInput(Model):

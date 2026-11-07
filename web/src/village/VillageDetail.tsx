@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import './village.css';
 import { criticalPresentation, type CriticalStatus } from './critical';
+import { scenarioGainText, hydraulicAssumptionText, type ModelSetup } from './scenario';
 
 type Point = { date: string; wt_cm: number; pfvi: number };
 type Status = CriticalStatus & { confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[] };
-type Simulation = { days_bought: number | null; at_least_days: number | null; reason: string | null; wt_gain_cm: number; pfvi_reduction: number; baseline_critical_date: string | null; scenario_critical_date: string | null; curve_baseline: Point[]; curve_scenario: Point[]; assumptions: string[] };
+type Simulation = { days_bought: number | null; at_least_days: number | null; reason: string | null; wt_gain_cm: number; pfvi_reduction: number; baseline_critical_date: string | null; scenario_critical_date: string | null; curve_baseline: Point[]; curve_scenario: Point[]; assumptions: string[]; model_setup?: ModelSetup };
 type History = { version: number; created_at: string; observation_id?: string | null; params: { provenance?: string; initial_wt_cm?: number }; old?: Status; new?: Status; observed_wt_cm?: number; applied_initial_wt_delta_cm?: number };
 type Bundle = { status: Status; simulation: Simulation; canals: { id: string; name: string; source: string }[]; resources: { pumps: number; crews: number }; history: History[] };
-const number = (n: number | null) => n === null ? 'belum tersedia' : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(n);
+const number = (n: number | null, maximumFractionDigits = 1) => n === null ? 'belum tersedia' : new Intl.NumberFormat('id-ID', { maximumFractionDigits }).format(n);
 
 export function benefitText(s: Simulation): string {
   if (s.reason === 'baseline_already_critical') return 'Kondisi awal sudah melewati ambang kritis; tidak ada tambahan hari sebelum kritis.';
@@ -76,12 +77,15 @@ export default function VillageDetail({ villageId, mode, day }: { villageId: str
     <header><span className="village-eyebrow">{mode === 'replay' ? `Replay · hari ${day}` : 'Kondisi desa'} · Level PFVI {critical.pfviLevel}</span>{critical.wtCritical && <p className="village-warning" role="status"><strong>WT KRITIS sekarang · air tanah modelled ≥60 cm</strong></p>}<h2>{critical.urgency}</h2><p className="village-benefit">{benefitText(sim)}</p></header>
     <p>Ambang kritis model: air tanah ≥60 cm atau PFVI ≥250; level PFVI memakai indeks PFVI saja.</p>
     <p className="village-model">modelled · perkiraan model, belum diukur</p>
+    <p>{scenarioGainText(sim)}</p>
     <div className="village-stats"><div><small>PFVI · modelled</small><strong>{number(s.pfvi)} / 300</strong></div><div><small>Air tanah · modelled</small><strong>{number(s.wt_cm)} cm</strong></div><div><small>Keyakinan heuristik</small><strong>{number(s.confidence)}</strong></div></div>
     {error && <p role="status" className="village-warning">Pembaruan gagal: {error}. Angka terakhir tetap ditampilkan.</p>}
-    <ul className="village-summary"><li>PFVI menunjukkan kerentanan kebakaran gambut, bukan konfirmasi api.</li><li>Simulasi menutup sekat K4 dengan kenaikan batas air kanal +60 cm; ini bukan tindakan lapangan.</li><li>Kanal dan sumber daya adalah fixture contoh, bukan hasil survei.</li><li>{mode === 'replay' ? 'Replay memakai cuaca historis ERA5 yang diketahui; bukan prediksi di luar sampel.' : 'Cuaca publik menjadi masukan model; bukan pengukuran air tanah desa.'}</li></ul>
+    <ul className="village-summary"><li>PFVI menunjukkan kerentanan kebakaran gambut, bukan konfirmasi api.</li><li>Skenario K4: kenaikan batas air kanal +60 cm diterapkan pada kedua ujung satu strip simetris. K4 + K5 tidak memberi manfaat tambahan secara aditif; ini bukan simulasi dua kanal independen atau tindakan lapangan. Model saat ini mendukung maksimal 14 hari.</li><li>Kanal dan sumber daya adalah fixture contoh, bukan hasil survei.</li><li>{mode === 'replay' ? 'Replay memakai cuaca historis ERA5 yang diketahui; bukan prediksi di luar sampel.' : 'Cuaca publik menjadi masukan model; bukan pengukuran air tanah desa.'}</li></ul>
     <details className="pf-village-details"><summary>Lihat detail angka</summary>
       
       <p>Ambang kritis: air tanah ≥60 cm atau PFVI ≥250. Keyakinan bukan probabilitas terkalibrasi.</p>
+      <p>{hydraulicAssumptionText(sim.model_setup)}</p>
+      {sim.model_setup && <p>Susunan model dari API: {number(sim.model_setup.nodes)} node; konduktivitas {number(sim.model_setup.conductivity_m_day, 6)} m/hari; specific yield {number(sim.model_setup.specific_yield, 6)}; horizon {number(sim.model_setup.horizon_days)} hari. Batas pada kedua ujung; target mewakili satu strip simetris.</p>}
       <div className="village-chart-switch" role="group" aria-label="Angka pada grafik"><button type="button" aria-pressed={metric === 'wt_cm'} onClick={() => setMetric('wt_cm')}>Air tanah</button><button type="button" aria-pressed={metric === 'pfvi'} onClick={() => setMetric('pfvi')}>PFVI</button></div>
       <CurveChart simulation={sim} metric={metric} />
       <p>Pada akhir horizon: air tanah lebih dangkal {number(sim.wt_gain_cm)} cm; penurunan PFVI {number(sim.pfvi_reduction)}. Ini selisih model, bukan hasil terukur.</p>

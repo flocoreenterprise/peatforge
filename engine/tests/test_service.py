@@ -2,6 +2,7 @@ import copy
 import json
 import unittest
 from datetime import date, timedelta
+from dataclasses import replace
 from unittest.mock import patch
 
 from agents.models import ForecastPoint, Simulation, Status
@@ -86,6 +87,25 @@ class ServiceTests(unittest.TestCase):
         self.assertAlmostEqual(result['wt_gain_cm'],0,places=9)
         self.assertAlmostEqual(result['pfvi_reduction'],0,places=9)
         self.assertTrue(any('No quantitative' in a for a in result['assumptions']))
+
+    def test_simulation_reports_actual_setup_and_single_strip_target_semantics(self):
+        self.engine.hydraulic = replace(self.engine.hydraulic, spacing_m=350,
+                                        conductivity_m_day=4, specific_yield=.25,
+                                        effective_thickness_m=20)
+        request = dict(type='canal_block', targets=['K4'], mode='replay', day=5, days=14)
+        single = self.engine.simulate(V, request)
+        multiple = self.engine.simulate(V, dict(request, targets=['K4', 'K5']))
+        self.assertEqual(single, multiple)
+        self.assertEqual(single['model_setup'], {
+            'spacing_m':350, 'nodes':51, 'conductivity_m_day':4, 'specific_yield':.25,
+            'effective_hydraulic_thickness_m':20, 'boundary_application':'both_endpoints',
+            'target_effect':'single_symmetric_strip', 'horizon_days':14,
+            'provenance':'team_assumption_not_field_calibrated'})
+        self.assertEqual(len(single['curve_baseline']), 15)
+        self.assertEqual(len(single['curve_scenario']), 15)
+        Simulation.model_validate(single)
+        with self.assertRaises(ValueError):
+            self.engine.simulate(V, dict(request, days=15))
 
     def test_replay_calendar_and_metadata_point_map(self):
         self.assertEqual(replay_meta()['days'],62)

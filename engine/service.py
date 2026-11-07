@@ -244,7 +244,16 @@ class EngineService:
         ]
         if action != 'canal_block':
             assumptions.append('No quantitative hydraulic effect is assigned to standby or verification; benefit is operational, not modelled days')
-        return compare_curves(baseline,scenario,assumptions)
+        result = compare_curves(baseline,scenario,assumptions)
+        result['model_setup'] = {
+            'spacing_m': self.hydraulic.spacing_m, 'nodes': self.hydraulic.nodes,
+            'conductivity_m_day': self.hydraulic.conductivity_m_day,
+            'specific_yield': self.hydraulic.specific_yield,
+            'effective_hydraulic_thickness_m': self.hydraulic.effective_thickness_m,
+            'boundary_application': 'both_endpoints', 'target_effect': 'single_symmetric_strip',
+            'horizon_days': days, 'provenance': 'team_assumption_not_field_calibrated',
+        }
+        return result
 
     def get_canals(self, village_id: str) -> list[dict]:
         return canals(village_id)

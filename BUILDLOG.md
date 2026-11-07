@@ -87,3 +87,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 
 - QA1 Scout: existing cloud POST route verified and banner absent; public-demo Scout failures stay in a quiet retry status instead of main banner; Scout11tests PASS, webbuild PASS.
 - QA2 critical clarity: PFVI level preserved; current WT/PFVI critical flags and WT-critical map/detail labels separated from future forecast; root155tests+37subtests PASS, webbuild +10presentationassertions PASS; no numerical tuning.
+- QA3 physical audit: preserved +1day; actualday9 horizonWTgain14.263cm, K4/K4+K5 identical; exposed actual400m/24m-effective assumptions and14day cap, no tuning; root156tests+37subtests PASS, webbuild+20scenario/criticalassertions PASS.
