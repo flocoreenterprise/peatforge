@@ -76,3 +76,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - B5: Planner/Verifier + idempotent approval/follow-up + contextual SMS progress; 44 backend unittest tests PASS, audit context issues fixed; mock delivery only.
 - C2: five real BMKG pilot markers, modelled risk and filtered hotspots, Live/Replay polling4s; web build PASS; root full suite96 +15subtests PASS; actual API smoke PASS.
 - C3: real B5 decision approvals/rejections and SMS simulator/progress polling4s; web build PASS, formatter7 assertions PASS; backend full suite96+15subtests PASS. Integrated security: noP0/P1; synchronous live-webhook ack P2 deferred until realSMS.
+- C4: summary-first village detail, modelled PFVI/WT, honest Days Bought, WT/PFVI curves and Replay; strictTS + webbuild PASS; actualcached replay9 gives1day; light/dark CSS corrected.

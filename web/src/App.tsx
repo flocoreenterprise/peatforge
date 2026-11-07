@@ -3,6 +3,7 @@ import { ArrowRight, Check, ChevronRight, CircleHelp, Fingerprint, Leaf, LockKey
 import { api, ApiError, mockConfig, type Config } from './api';
 import MapCanvas from './map/MapCanvas';
 import DecisionInbox, { SmsLoop } from './inbox/DecisionInbox';
+import VillageDetail from './village/VillageDetail';
 import { usePilot, dateLabel, replayDate, number, type Mode } from './map/pilot';
 
 type Tab = 'Keputusan' | 'Desa' | 'Telepon-SMS';
@@ -27,7 +28,6 @@ export default function App() {
   const pilot = usePilot(phase === 'command' && !preview, mode, day);
   const { villages, risk, hotspots, meta } = pilot;
   const selected = villages.find(v => v.id === selectedId) ?? villages[0];
-  const selectedStatus = risk?.features.find(f => f.properties.village_id === selected?.id)?.properties;
   const selectedDate = replayDate(meta, day);
   const [connection, setConnection] = useState('');
 
@@ -90,7 +90,7 @@ export default function App() {
         <nav className="panel-tabs" aria-label="Panel operasi">{tabs.map(({ name, icon: Icon }) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={16}/><span>{name}</span></button>)}</nav>
         <div className="panel-content">
           {tab === 'Keputusan' && <><DecisionInbox villageId={selected?.id} mode={mode} day={day}/><button className="text-button" onClick={() => setTab('Telepon-SMS')}>Buka alur SMS <ArrowRight size={16}/></button></>}
-          {tab === 'Desa' && <><div className="section-heading"><h2>Wilayah pantauan</h2><span>{pilot.loading ? 'Memuat risiko…' : `${villages.length} desa`}</span></div>{villages.length ? <div className="village-list">{villages.map(village => { const status = risk?.features.find(f => f.properties.village_id === village.id)?.properties; return <button className={`village-row ${village.id === selected?.id ? 'selected' : ''}`} key={village.id} onClick={() => selectVillage(village.id)}><span className="village-icon"><Trees size={18}/></span><div><strong>{village.name}</strong><span>{status ? <><i className={`status-dot ${status.level.toLowerCase()}`}/>{status.level} · {status.stale ? 'cache lama' : status.source === 'fixture' ? 'contoh' : 'model'}</> : 'Risiko belum tersedia'}</span></div><ChevronRight size={16}/></button>; })}</div> : <Empty icon="village" title="Menunggu data desa" text="Lokasi dan kondisi desa tersedia setelah layanan terhubung."/>}{selected && <section className="selected-village"><span className="eyebrow">DESA TERPILIH</span><h3>{selected.name}</h3><p>{selectedStatus ? `${selected.name} berada pada tingkat ${selectedStatus.level.toLowerCase()}. ${selectedStatus.days_to_critical == null ? 'Tidak ada perlintasan batas kritis dalam horizon model.' : selectedStatus.days_to_critical === 0 ? 'Batas kritis model sudah tercapai.' : `Batas kritis model diperkirakan dalam ${number(selectedStatus.days_to_critical)} hari.`}` : 'Risiko belum tersedia. Kondisi belum dapat disimpulkan.'}</p><div className="village-numbers"><span>Indeks rawan api<strong>{number(selectedStatus?.pfvi)}<small> / 300</small></strong></span><span>Air tanah model<strong>{number(selectedStatus?.wt_cm)}<small> cm</small></strong></span></div><p className="source-line">Air tanah: perkiraan model, belum diukur.</p><p className="source-line">Lokasi: {selected.source === 'provider' ? 'BMKG' : selected.source} · titik referensi, bukan batas desa.</p><p className="source-line">Risiko: {selectedStatus?.source ?? 'belum tersedia'}{selectedStatus?.stale ? ' · cache lama' : ''} · data per {dateLabel(selectedStatus?.data_as_of)}</p></section>}</>}
+          {tab === 'Desa' && <><div className="section-heading"><h2>Wilayah pantauan</h2><span>{pilot.loading ? 'Memuat risiko…' : `${villages.length} desa`}</span></div>{villages.length ? <div className="village-list">{villages.map(village => { const status = risk?.features.find(f => f.properties.village_id === village.id)?.properties; return <button className={`village-row ${village.id === selected?.id ? 'selected' : ''}`} key={village.id} onClick={() => selectVillage(village.id)}><span className="village-icon"><Trees size={18}/></span><div><strong>{village.name}</strong><span>{status ? <><i className={`status-dot ${status.level.toLowerCase()}`}/>{status.level} · {status.stale ? 'cache lama' : status.source === 'fixture' ? 'contoh' : 'model'}</> : 'Risiko belum tersedia'}</span></div><ChevronRight size={16}/></button>; })}</div> : <Empty icon="village" title="Menunggu data desa" text="Lokasi dan kondisi desa tersedia setelah layanan terhubung."/>}{selected && <><h2 className="selected-village-heading">{selected.name}</h2><VillageDetail villageId={selected.id} mode={mode} day={day}/></>}</>}
           {tab === 'Telepon-SMS' && <><SmsLoop villageId={selected?.id} mode={mode} day={day}/><button className="text-button" onClick={() => setTab('Keputusan')}>Buka kotak keputusan <ArrowRight size={16}/></button></>}
 
         </div>
