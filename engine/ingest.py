@@ -141,7 +141,7 @@ class Ingest:
                   'hourly': 'soil_moisture_0_to_7cm'}
         if start:
             host = 'https://archive-api.open-meteo.com/v1/archive'
-            params.update(start_date=start.isoformat(), end_date=end.isoformat(), models='era5_land')
+            params.update(start_date=start.isoformat(), end_date=end.isoformat(), models='era5')
         else:
             host = 'https://api.open-meteo.com/v1/forecast'
             params['forecast_days'] = days
@@ -163,7 +163,7 @@ class Ingest:
                                 urlencode({'adm4': village['id']}), parse_bmkg, ttl=10800)
         return {'available': True, 'source': 'modelled', 'stale': result['stale'],
                 'data_as_of': _stamp(result['fetched_at']), 'items': result['data']['data'],
-                'assumptions': ['Unverified seed adm4; BMKG forecasts are supplementary']}
+                'assumptions': ['BMKG forecasts are supplementary; village reference point is not a boundary']}
 
     def hotspots(self) -> dict:
         if self.mode == 'fixture':

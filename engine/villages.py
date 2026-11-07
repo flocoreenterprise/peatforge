@@ -1,18 +1,20 @@
-"""Unverified synthetic pilot seeds. These are not administrative boundaries."""
+"""BMKG village metadata verified 2026-11-07; no administrative boundaries."""
 from copy import deepcopy
 
 _SEEDS = [
-    ('62.11.01.2002', 'Talio', 'TAL', -3.00, 114.10),
-    ('62.11.01.2003', 'Talio Hulu', 'THU', -2.98, 114.12),
-    ('62.11.01.2004', 'Talio Muara', 'TMU', -3.02, 114.09),
-    ('62.11.01.2005', 'Belanti Siam', 'BSI', -2.96, 114.14),
-    ('62.11.01.2006', 'Gadabung', 'GAD', -3.04, 114.11),
+    ('62.11.01.2002', 'Talio', 'TAL', -3.1222040246, 114.0981588862),
+    ('62.11.01.2003', 'Pangkoh Hilir', 'PHI', -3.0948407882, 114.1612351662),
+    ('62.11.01.2004', 'Pangkoh Hulu', 'PHU', -3.0401913737, 114.1576813408),
+    ('62.11.01.2005', 'Kantan Muara', 'KMU', -3.0086596884, 114.1169648671),
+    ('62.11.01.2006', 'Talio Muara', 'TMU', -3.093826788, 114.1209430709),
 ]
 
 
 def list_villages() -> list[dict]:
-    return [{'id': i, 'name': n, 'code': c, 'lat': lat, 'lon': lon, 'source': 'fixture',
-             'verified': False, 'assumptions': ['Unverified village name, adm4 mapping and approximate coordinate; no official boundary']}
+    return [{'id': i, 'name': n, 'code': c, 'lat': lat, 'lon': lon, 'source': 'provider',
+             'verified': True, 'provider': 'BMKG',
+             'source_url': 'https://api.bmkg.go.id/publik/prakiraan-cuaca?adm4=' + i,
+             'assumptions': ['BMKG village reference coordinate, not an official boundary; canal/well locations remain fixtures']}
             for i, n, c, lat, lon in _SEEDS]
 
 

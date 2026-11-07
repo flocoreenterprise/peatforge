@@ -27,12 +27,12 @@ from engine.ingest import Ingest
 from engine.cache import DiskCache
 fixture_data = Ingest()  # explicit synthetic provenance, never network
 weather = fixture_data.weather('62.11.01.2002')
-# Configured private runtime only; PUBLIC_DEMO must keep using Ingest().
+# Public environmental data is independent of login and communication credentials.
 # live_data = Ingest(DiskCache('engine/.cache'), mode='live')
 ```
 
 `weather()` returns daily rain/ET0 in mm, temperature C, mineral-soil moisture
-percent. Archive uses ERA5-Land and is labelled historical perfect-forecast
+percent. Archive uses ERA5 and is labelled historical perfect-forecast
 forcing. Forecast derives a 0-7 cm proxy from depth-weighted 0-1, 1-3, 3-9 cm
 layers, assuming uniform moisture within the last layer. Missing values remain
 null with reasons. Neither input is measured peat groundwater.
@@ -42,7 +42,7 @@ null with reasons. Neither input is measured peat groundwater.
 `partial`; stale cached data is labelled separately. Heat detections are not
 confirmed fires. `archive_hotspots()` requires an explicitly supplied key, uses
 five-day chunks, and defaults to NOAA-20 SP; no 2019 NOAA-21 coverage is invented.
-No live provider availability has been verified during A1.
+A1 did not verify live availability. A4 subsequently verified real cached numeric paths.
 
 Cache filenames are SHA256 of credential-redacted URLs; URLs and credentials are
 not persisted. Successful parsed bodies and UTC retrieval time are saved atomically.
@@ -52,8 +52,8 @@ refreshes use validated stale cache, but 401/403 always raises AuthenticationErr
 Each request has a ten-second timeout and one retry with backoff by default.
 Credentials are passed by callers, never loaded from environment files here.
 
-Five seeds have unverified synthetic adm4/name/coordinate mappings; no official
-boundaries are provided. Canals, wells and hamlets are fixtures. Fixture weather
+Five adm4/name/reference-coordinate mappings were verified against BMKG public metadata
+on 2026-11-07; no official boundaries are provided. Canals, wells and hamlets are fixtures. Fixture weather
 is a repeated three-day synthetic sequence, including in replay date windows;
 it must never be described as downloaded ERA5 history.
 
@@ -119,3 +119,47 @@ priors 175@40cm / 250@60cm at 28C and R0=3000. Those priors also define initial
 team defaults and are NOT independent validation. Output reports convergence;
 a finite bounded result with `converged=false` must not be called a successful
 scientific calibration. No parameters are silently persisted or adapted.
+
+A4 service:
+
+`engine.service` exports the exact agent tool interface: `village_status(id,
+mode='live', day=0)`, `forecast(id, days=14, mode='live', day=0)`,
+`simulate(id, request_dict)`, `get_canals`, `get_resources`, `get_hotspots`.
+The lazy default service uses real public inputs and disk cache under
+`runtime/engine/http`; importing it causes no network access. Offline tests use
+`EngineService(Ingest())` explicitly. Status, forecast and simulation satisfy
+strict agent models without extra keys.
+
+Replay precomputes 76 daily states (2019-06-15..2019-08-29), exposing 62 replay
+days and up to 14 future days at every replay position. Both historical and
+live states use the actual groundwater/PFVI engines. End-of-day states include
+that day's weather forcing and are estimates, not field measurements. Live
+requests retrieve 16 forecast days. Only initial soil moisture seeds PFVI;
+missing later soil moisture is not imputed or used to calibrate the model.
+Missing rain/ET0/temperature or initial soil moisture makes the run unavailable.
+
+A4 ingestion correction: ERA5-Land-only selection returned null rain and ET0;
+archive selection now explicitly uses ERA5, verified with complete required
+fields at all five corrected BMKG reference coordinates. BMKG metadata was
+checked from provider cache; names, adm4 IDs and coordinates now match provider
+records. Canal/well/hamlet layouts remain synthetic fixtures. Regional weather
+is gridded and does not imply village sensor precision.
+
+Simulation curves include the current state at index zero and `days` future
+states. Critical means PFVI>=250 OR WT>=60cm. Already critical returns zero;
+no baseline crossing returns null; scenario beyond horizon returns null plus
+a discrete lower bound (earliest possible unobserved crossing minus baseline
+crossing). Both retain horizon-end water/PFVI benefit. A block raises the shared
+strip boundary once regardless of number of fixture target IDs; effects are
+not multiplied. Pump standby/verification have no invented hydraulic effect.
+Replay hotspots are unavailable without archival data; current detections are
+never substituted. Backtest and adaptive recalibration are deferred; parameter
+history contains the initial version only.
+
+Manual provider verification 2026-11-07: all five correct-coordinate archives
+had 76 rows and zero missing rain/ET0/temperature/soil-moisture values. Talio
+replay day9, 60cm canal raise: baseline crossing June30, scenario crossing July1,
+Days Bought=1; horizon-end WT gain=14.263cm, PFVI reduction=5.526. Day8 instead
+returns a lower bound of at least8days, not an exact crossing. Parameters were
+not retuned to produce these outcomes. Real Talio live day0: PFVI79.875,
+WT38.470cm; no critical crossing within 14 days at retrieval time.

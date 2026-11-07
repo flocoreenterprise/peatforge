@@ -97,7 +97,7 @@ class IngestTests(unittest.TestCase):
     def test_seed_features_are_unverified_and_isolated(self):
         villages = list_villages()
         self.assertEqual(len(villages), 5)
-        self.assertTrue(all(v['source'] == 'fixture' and not v['verified'] for v in villages))
+        self.assertTrue(all(v['source'] == 'provider' and v['verified'] for v in villages))
         villages[0]['name'] = 'mutated'
         self.assertEqual(get_village(VILLAGE)['name'], 'Talio')
         self.assertEqual(len(canals(VILLAGE)), 6)
