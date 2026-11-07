@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .cache import DataUnavailable, DiskCache
+from .archive import FirmsArchive
 from .groundwater import load_params, solve_groundwater
 from .ingest import Ingest
 from .pfvi import ASSUMPTIONS, diobs, level, load_pfvi_config, run_pfvi
@@ -85,6 +86,7 @@ class EngineService:
     def __init__(self, ingest: Ingest | None = None, *, clock=time.time, state_path: str | Path | None = None):
         self.ingest = ingest or Ingest(DiskCache(Path(__file__).resolve().parent.parent / 'runtime/engine/http'), mode='live')
         self.clock = clock
+        self.archive = FirmsArchive(self.ingest.cache) if self.ingest.mode=='live' else None
         self.initial_configuration_at = datetime.fromtimestamp(self.clock(), UTC).isoformat().replace('+00:00','Z')
         self.hydraulic = load_params()
         self.pfvi_config = load_pfvi_config()
@@ -283,14 +285,29 @@ class EngineService:
             raise ValueError('Live mode requires day=0')
         scope = [get_village(village_id)] if village_id else list_villages()
         if mode == 'replay':
-            return {'items':[], 'available':False,'stale':False,'data_as_of':None,
-                    'reason':'Historical hotspots unavailable without configured FIRMS archive key; live detections are not replayed'}
+            if radius_km>5:
+                raise ValueError('Historical archive coverage is limited to five pilot5km circles')
+            data=self.archive_summary()
+            if not data['available']:
+                return data
+            # Replay dates are local WIB model days; detections remain UTC.
+            now=datetime.combine(START+timedelta(days=day+1),datetime.min.time(),UTC)-timedelta(hours=7)
+            items=[h for h in data['items'] if 0 <= (now-datetime.fromisoformat(h['detected_at'].replace('Z','+00:00'))).total_seconds() <= hours*3600
+                   and any(_distance_km(v['lat'],v['lon'],h['lat'],h['lon']) <= radius_km for v in scope)]
+            return dict(data,items=items,window_count=len(items))
         data = self.ingest.hotspots()
         now = datetime.fromtimestamp(self.clock(),UTC) if self.ingest.mode == 'live' else datetime(2019,6,16,tzinfo=UTC)
         items = [h for h in data['items'] if 0 <= (now-datetime.fromisoformat(h['detected_at'].replace('Z','+00:00'))).total_seconds() <= hours*3600
                  and any(_distance_km(v['lat'],v['lon'],h['lat'],h['lon']) <= radius_km for v in scope)]
         items = list({h['id']:h for h in items}.values())
         return dict(data, items=items)
+
+    def archive_summary(self) -> dict:
+        if self.archive is None:
+            return {'items':[],'available':False,'source':'NASA FIRMS archive','stale':False,
+                    'data_as_of':None,'reason':'Historical archive is not represented by fixtures',
+                    'total_unique':None,'by_village':{},'partial':False}
+        return self.archive.hotspots()
 
     def map_risk(self, mode: str = 'live', day: int = 0) -> dict:
         return {'type':'FeatureCollection','features':[{'type':'Feature', 'geometry':{'type':'Point','coordinates':[v['lon'],v['lat']]},

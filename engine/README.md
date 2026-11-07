@@ -234,3 +234,32 @@ parameter-history API and post-assimilation simulation. An isolated memory-only
 real-cache check (no network, no demo-state mutation) changed Talio modelled WT
 38.470->48.470cm and PFVI79.875->80.893 after a synthetic +10cm observation;
 this demonstrates computation, not an actual field observation or validation.
+
+Post-UAT FIRMS2019 archive:
+
+`FirmsArchive(cache, map_key=None).hotspots()` retrieves VIIRS_SNPP_SP standard
+processing, June15..August15 2019 in thirteen <=5day official AreaAPI chunks.
+Only during an archive request, a missing explicit key is resolved from the
+latest programmatic dotenv configuration (fallback process environment). No
+credential or keyed URL is returned/logged/persisted. Missing key stays
+unavailable. Cache filenames redact path credentials and parsed CSV bodies are
+cached for historical reuse. Official documentation:
+https://firms.modaps.eosdis.nasa.gov/api/area/
+
+Download bbox is only a prefilter. Detection membership uses haversine <=5km
+from actual five BMKG pilot reference coordinates. Union is deduplicated by
+satellite/time/coordinate ID; per-village overlapping counts must not be summed.
+All13 chunks are required for `total_unique`; partial success instead sets
+`total_unique=null`, `retrieved_unique` and incomplete date coverage with exact
+missing ranges. `source` is exactly `NASA FIRMS archive`, not confirmed fires.
+FIRMS acquisition dates/coverage are UTC. Replay windows are model-day WIB;
+a UTC August15 late-evening detection can fall on August16 WIB and therefore
+is not displayed in the August15 replay window.
+
+GET `/api/replay/hotspots/summary` exposes counts/coverage without the point list.
+Existing hotspots mode=replay now filters real archive data by historical time
+and requested pilot circle (radius <=5km, matching archive coverage). Fixtures
+do not access real credentials/providers and remain explicitly unavailable.
+Verified all13 chunks succeeded: uniqueunion2, Talio1, TalioMuara1, otherpilots0;
+detections August9 05:27UTC and August15 17:57UTC. These are actual heat
+detections, not validation of groundwater/PFVI predictions.

@@ -207,7 +207,7 @@ class Ingest:
                     'reason': 'FIRMS_MAP_KEY unset'}
         if end < start or (end - start).days > 366:
             raise ValueError('Archive range must be ordered and at most 367 days')
-        if not sources or any(s not in ('VIIRS_NOAA20_SP', 'VIIRS_NOAA21_NRT', 'VIIRS_NOAA21_SP') for s in sources):
+        if not sources or any(s not in ('VIIRS_SNPP_SP', 'VIIRS_NOAA20_SP', 'VIIRS_NOAA21_NRT', 'VIIRS_NOAA21_SP') for s in sources):
             raise ValueError('Unsupported historical sensor')
         west, south, east, north = bbox
         if not all(math.isfinite(v) for v in bbox) or not (-180 <= west < east <= 180 and -90 <= south < north <= 90):

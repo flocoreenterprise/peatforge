@@ -140,6 +140,12 @@ def create_router(service: EngineService | None = None) -> APIRouter:
                  mode: Mode='live',day: int=Query(0,ge=0,lt=REPLAY_DAYS)):
         return _response(engine().get_hotspots(village_id,hours,radius_km,mode,day))
 
+    @router.get('/replay/hotspots/summary')
+    def archive_summary():
+        result=dict(engine().archive_summary())
+        result.pop('items',None)
+        return _response(result)
+
     @router.get('/replay/meta')
     def meta():
         return _response(replay_meta())
