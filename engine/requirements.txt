@@ -1,3 +1,5 @@
 # Ingest and groundwater numerics use Python 3.11+ standard library.
 # YAML provenance configuration loader:
 PyYAML>=6.0,<7
+numpy>=1.26,<3
+scipy>=1.11,<2

@@ -94,3 +94,28 @@ If the explicit solver exceeds its substep budget, the entire run restarts
 from the original profile using a labelled lumped bucket approximation, with
 the same output shape and a `fallback_reason`. Invalid inputs always raise.
 Callers can require the resolved solver using `allow_fallback=False`.
+
+A3 PFVI:
+
+`run_pfvi(wt_cm, rain_mm, temperature_c, ...)` consumes positive-down centimetres,
+returns a finite 0..300 index, deterministic risk level, and daily DF/RF/WTF
+components. Missing/nonfinite forcing raises. First-day previous rain is unknown
+(`None`) unless explicitly provided; `last_rain_mm` supports sequence continuation.
+Each returned value is post-day, matching groundwater. Drying defaults to an
+assumed annual rainfall R0=3000mm, not that day's rain.
+
+Equations credited to peatfr / Mahdiyasa, Melly, Pasaribu, Taufik and Muljadi
+(2025), package author Melly. Primary reference read during implementation:
+https://github.com/mellygsln/peatfr/blob/main/R/Function%20Fire%20Predict.R
+Upstream DESCRIPTION declares MIT. This independent implementation deliberately
+corrects the upstream `c(Rf[-length(Rf)], NA)` same-day rain alignment to the
+specified previous-day rule; public outputs are clamped after each step.
+
+`calibrate(...)` uses deterministic two-start bounded Nelder-Mead with aH 0..50,
+bH .01...5, n 1.05..8, alpha 5..300cm. Soil DIobs uses the 15/45 mineral proxy;
+`load_pfvi_config()` reads these proxy bounds and default values from YAML.
+The objective combines trajectory MSE and explicitly labelled dry-equilibrium
+priors 175@40cm / 250@60cm at 28C and R0=3000. Those priors also define initial
+team defaults and are NOT independent validation. Output reports convergence;
+a finite bounded result with `converged=false` must not be called a successful
+scientific calibration. No parameters are silently persisted or adapted.

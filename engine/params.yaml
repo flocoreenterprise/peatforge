@@ -20,3 +20,28 @@ groundwater:
   stability_safety:
     value: 0.90
     source: 'Team numerical safety margin below explicit monotonicity limit'
+pfvi:
+  aH:
+    value: 6.192465462820873
+    source: 'Team dry-equilibrium prior at 28C/R0=3000, jointly chosen with bH; not locally fitted'
+  bH:
+    value: 0.045505543655178664
+    source: 'Team dry-equilibrium prior 175@40cm and 250@60cm; not independent validation'
+  n:
+    value: 2.0
+    source: 'Team initial van Genuchten shape; constrained 1.05..8'
+  alpha_cm:
+    value: 50.0
+    source: 'Team initial retention depth scale in cm; constrained 5..300'
+  mineral_fc_pct:
+    value: 15.0
+    source: 'Team proxy bound for Open-Meteo MINERAL soil moisture; not peat field capacity'
+  mineral_sat_pct:
+    value: 45.0
+    source: 'Team proxy bound for Open-Meteo MINERAL soil moisture; not peat saturation'
+  annual_rain_mm:
+    value: 3000.0
+    source: 'peatfr default R0 annual rainfall assumption, mm/year; not a local observation'
+  prior_weight:
+    value: 1.0
+    source: 'Team regularization weight; dry equilibrium priors are not validation data'
