@@ -74,6 +74,23 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(geo['features'][0]['geometry']['type'],'Point')
         self.assertTrue(any('perfect-forecast' in a for a in first['items'][0]['assumptions']))
 
+    def test_default_hotspots_union_pilot_circles_deduplicated(self):
+        class Regional(Ingest):
+            def hotspots(self):
+                local=dict(id='local',lat=-3.1222040246,lon=114.0981588862,
+                           detected_at='2019-06-15T12:00:00Z',source='fixture')
+                distant=dict(local,id='distant',lat=0,lon=120)
+                return dict(items=[local,local.copy(),distant],available=True,stale=True,
+                            data_as_of='2019-06-15T12:00:00Z',source='fixture',partial=True)
+        service=EngineService(Regional())
+        response=service.get_hotspots(radius_km=5)
+        self.assertEqual([h['id'] for h in response['items']],['local'])
+        self.assertTrue(response['available'])
+        self.assertTrue(response['stale'])
+        self.assertTrue(response['partial'])
+        self.assertEqual(response['data_as_of'],'2019-06-15T12:00:00Z')
+        self.assertEqual(service.get_hotspots('62.11.01.2004',radius_km=1)['items'],[])
+
     def test_hotspot_replay_unavailable_and_no_network(self):
         self.assertFalse(self.engine.get_hotspots(V,mode='replay',day=5)['available'])
         self.assertFalse(self.engine.backtest(V)['available'])

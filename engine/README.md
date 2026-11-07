@@ -163,3 +163,32 @@ Days Bought=1; horizon-end WT gain=14.263cm, PFVI reduction=5.526. Day8 instead
 returns a lower bound of at least8days, not an exact crossing. Parameters were
 not retuned to produce these outcomes. Real Talio live day0: PFVI79.875,
 WT38.470cm; no critical crossing within 14 days at retrieval time.
+
+A5 API:
+
+```python
+from engine.api import create_router
+# Parent app owns the operator/public environmental access decision.
+app.include_router(create_router(), prefix='/api',
+                   dependencies=[Depends(require_operator)])
+# Isolated offline tests instead pass create_router(EngineService(Ingest())).
+```
+
+Routes cover villages, status/forecast/simulate, canals/resources, initial
+parameter history, risk point GeoJSON, hotspots, replay metadata/day plus scenario
+alias, unavailable backtest, and POST warmup. All response shapes retain the
+contract; full provider/cache/model assumptions are available on status/simulation.
+No observations/adaptive route is added because A6 was cut. There is no import-time
+service initialization or network. Parent auth exceptions preserve their status.
+
+Inputs are bounded to the available 14-day horizon and 62-day replay window.
+Errors return safe contract envelopes: unknown village404, invalid input422,
+provider/model unavailable503. Invalid/nonfinite output never becomes JSON.
+No provider exception strings, tracebacks or raw validation input are returned.
+Warmup runs one bounded five-village batch in one selected mode, at most five
+workers; overlapping warmup requests return429. Network retry/timeout limits
+remain those of the injected cache. Tests use temporary/synthetic data; manual
+real-cache verification explicitly disabled network fetches in its injected cache.
+The real-cache TestClient returned200 for Talio live/replay status and replayday9
+simulation, preserving the independently verified exact one-day result. No
+second deployed server or tunnel was started for this verification.

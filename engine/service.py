@@ -183,14 +183,17 @@ class EngineService:
                      mode: str = 'live', day: int = 0) -> dict:
         if not 1 <= hours <= 168 or not 0 < radius_km <= 100 or mode not in ('live','replay') or not 0 <= day < REPLAY_DAYS:
             raise ValueError('Invalid hotspot query')
-        village = get_village(village_id) if village_id else None
+        if mode == 'live' and day != 0:
+            raise ValueError('Live mode requires day=0')
+        scope = [get_village(village_id)] if village_id else list_villages()
         if mode == 'replay':
             return {'items':[], 'available':False,'stale':False,'data_as_of':None,
                     'reason':'Historical hotspots unavailable without configured FIRMS archive key; live detections are not replayed'}
         data = self.ingest.hotspots()
         now = datetime.fromtimestamp(self.clock(),UTC) if self.ingest.mode == 'live' else datetime(2019,6,16,tzinfo=UTC)
         items = [h for h in data['items'] if 0 <= (now-datetime.fromisoformat(h['detected_at'].replace('Z','+00:00'))).total_seconds() <= hours*3600
-                 and (village is None or _distance_km(village['lat'],village['lon'],h['lat'],h['lon']) <= radius_km)]
+                 and any(_distance_km(v['lat'],v['lon'],h['lat'],h['lon']) <= radius_km for v in scope)]
+        items = list({h['id']:h for h in items}.values())
         return dict(data, items=items)
 
     def map_risk(self, mode: str = 'live', day: int = 0) -> dict:
