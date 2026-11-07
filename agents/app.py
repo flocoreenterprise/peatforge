@@ -3,12 +3,21 @@ from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import Field
+from engine.api import create_router
+from engine.cache import DataUnavailable
+from engine.ingest import Ingest
+from engine.service import EngineService
+from engine.villages import list_villages
 from .brain import OfflineBrain
-from .channels import ChannelAdapter, ChannelSettings, ChannelUnavailable, verify_webhook
-from .db import Database
+from .channels import ChannelAdapter, ChannelSettings, ChannelUnavailable, Inbound, verify_webhook
+from .db import Database, identifier
+from .models import Level, Mode, Model
 from .tools import ToolService, seed_mock
+from .warden import Warden, message_items
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
 
@@ -36,14 +45,36 @@ def _database_scope(database: Database, public_demo: bool) -> None:
         connection.execute("INSERT OR IGNORE INTO kv(key,value) VALUES('database_scope',?)", (json.dumps(expected),))
 
 
+def require_operator(request: Request) -> None:
+    if not request.app.state.public_demo:
+        raise HTTPException(401, 'Operator authentication unavailable')
+
+
+class DemoInbound(Model):
+    responder_id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=500)
+    mode: Mode = 'live'
+    day: int = Field(default=0, ge=0, le=61)
+
+
+class DemoAlert(Model):
+    village_id: str = Field(min_length=1, max_length=80)
+    mode: Mode = 'live'
+    day: int = Field(default=0, ge=0, le=61)
+    level_to: Level | None = None
+    hour_override: int | None = Field(default=None, ge=0, le=23)
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
-               public_demo: bool | None = None) -> FastAPI:
+               public_demo: bool | None = None, engine: EngineService | None = None,
+               data_source: str | None = None) -> FastAPI:
     public_demo = public_demo_setting(os.environ.get('PUBLIC_DEMO')) if public_demo is None else public_demo
-    # Until the engine fixture-input adapter exists, public demo never imports real sources.
-    engine_mode = os.environ.get('PEATFORGE_ENGINE_MODE', 'mock').strip() or 'mock'
-    if engine_mode not in ('mock', 'real'):
-        raise ValueError('PEATFORGE_ENGINE_MODE must be mock or real')
-    mock = True if public_demo else (engine_mode == 'mock' if mock is None else mock)
+    source = data_source or os.environ.get('PEATFORGE_DATA_SOURCE', '').strip() or 'live'
+    if source not in ('live', 'fixture'):
+        raise ValueError('PEATFORGE_DATA_SOURCE must be live or fixture')
+    # Auth and channels do not select environmental inputs. No network at construction.
+    engine = engine if engine is not None else EngineService(Ingest() if source == 'fixture' else None)
+    source = engine.ingest.mode
     default_path = RUNTIME_DIR / ('demo.sqlite3' if public_demo else 'state.sqlite3')
     configured_path = os.environ.get('PEATFORGE_DB_PATH', '').strip()
     path = Path(db_path if db_path is not None else configured_path or default_path).resolve()
@@ -56,20 +87,100 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         database = Database(path)
         database.initialize()
         _database_scope(database, public_demo)
-        if mock:
+        if public_demo:
             seed_mock(database)
+            with database.connect() as connection:
+                for index, village in enumerate(list_villages(), 1):
+                    connection.execute('INSERT OR IGNORE INTO responders(id,village_id,name) VALUES(?,?,?)',
+                        (f'r{index}', village['id'], 'Responder demo ' + village['name']))
+                    for canal in engine.get_canals(village['id']):
+                        connection.execute('INSERT OR IGNORE INTO landmarks(id,village_id,name,aliases,source) VALUES(?,?,?,?,?)',
+                            (canal['id'], village['id'], canal['name'], json.dumps(canal.get('aliases', [])), 'fixture'))
         app.state.database = database
-        app.state.tools = ToolService(database, mock=mock)
+        app.state.engine = engine
+        app.state.tools = ToolService(database, mock=public_demo, engine=engine)
         app.state.channels = ChannelAdapter(database, ChannelSettings.from_environment(public_demo=public_demo))
         app.state.tools.channels = app.state.channels
+        app.state.warden = Warden(database, app.state.tools, app.state.channels)
+        app.state.channels.on_inbound = app.state.warden.handle
+        app.state.channels.prepare_inbound = app.state.warden.prepare
         app.state.brain = OfflineBrain()
         yield
 
     app = FastAPI(title='Peatforge', lifespan=lifespan)
     app.state.public_demo = public_demo
     app.state.database_path = path
-    app.state.config = dict(mode='mock' if mock else 'real', public_demo=public_demo,
+    app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
+                            source=source, engine='deterministic', outbound='mock' if public_demo else 'configured_only',
                             poll_ms=4000, field_poll_ms=3000, voice_available=False)
+
+    @app.exception_handler(RequestValidationError)
+    @app.exception_handler(ValueError)
+    @app.exception_handler(TypeError)
+    @app.exception_handler(RecursionError)
+    async def invalid_handler(request, exception):
+        return JSONResponse({'error': {'code': 'invalid', 'message': 'Permintaan tidak valid'}}, status_code=422)
+
+    @app.exception_handler(DataUnavailable)
+    @app.exception_handler(ChannelUnavailable)
+    async def unavailable_handler(request, exception):
+        return JSONResponse({'error': {'code': 'unavailable', 'message': 'Data belum tersedia'}}, status_code=503)
+
+    @app.exception_handler(KeyError)
+    async def missing_handler(request, exception):
+        return JSONResponse({'error': {'code': 'not_found', 'message': 'Data tidak ditemukan'}}, status_code=404)
+
+    @app.exception_handler(HTTPException)
+    async def auth_handler(request, exception):
+        return JSONResponse({'error': {'code': 'unauthorized' if exception.status_code == 401 else 'forbidden', 'message': 'Akses ditolak'}}, status_code=exception.status_code)
+
+    app.include_router(create_router(service=engine), prefix='/api', dependencies=[Depends(require_operator)])
+    operator = APIRouter(prefix='/api', dependencies=[Depends(require_operator)])
+
+    @operator.get('/config')
+    def config():
+        return app.state.config
+
+    @operator.get('/responders')
+    def responders(village_id: str | None = None):
+        with app.state.database.connect() as connection:
+            rows = connection.execute('SELECT id,village_id,name,role,tier,phone_last4,consent_at,last_contacted_at FROM responders WHERE (? IS NULL OR village_id=?)', (village_id, village_id)).fetchall()
+        return {'items': [dict(row) for row in rows]}
+
+    @operator.get('/responders/{responder_id}/messages')
+    def messages(responder_id: str, after: str | None = None):
+        with app.state.database.connect() as connection:
+            if not connection.execute('SELECT 1 FROM responders WHERE id=?', (responder_id,)).fetchone():
+                raise KeyError('Unknown responder')
+        return {'items': message_items(app.state.database, responder_id, after)}
+
+    @operator.post('/demo/inbound')
+    def demo_inbound(body: DemoInbound):
+        if not public_demo:
+            raise HTTPException(403, 'Demo only')
+        if body.mode == 'live' and body.day != 0:
+            raise ValueError('Invalid live day')
+        return app.state.channels.inbound(Inbound(responder_id=body.responder_id, channel='web', text=body.text, mode=body.mode, day=body.day))
+
+    @operator.post('/events/risk-changed')
+    def risk_changed(body: DemoAlert):
+        if not public_demo:
+            raise HTTPException(403, 'Demo only')
+        status = app.state.tools.get_village_status(body.village_id, body.mode, body.day)
+        if status.pfvi is None or status.wt_cm is None:
+            raise DataUnavailable('Alert facts unavailable')
+        trace_id = identifier('t')
+        with app.state.database.connect() as connection:
+            rows = connection.execute('SELECT id FROM responders WHERE village_id=?', (body.village_id,)).fetchall()
+        for row in rows:
+            app.state.warden.reset_for_alert(row['id'], body.mode, body.day, trace_id)
+            text = f'Simulasi notifikasi. Tingkat model {status.level}; indeks {status.pfvi:g}; air {status.wt_cm:g} cm (perkiraan model, belum diukur). Balas AIR dalam cm dan ASAP YA atau TIDAK.'
+            app.state.channels.send(row['id'], text, 'sms', trace_id=trace_id)
+        return {'trace_id': trace_id, 'notified': len(rows), 'suppressed': 0, 'mock': True,
+                'level': status.level, 'source': status.source, 'mode': body.mode, 'day': body.day,
+                'assumptions': ['Pemicu demo manual; override tidak mengubah fakta model']}
+
+    app.include_router(operator)
 
     @app.get('/api/health')
     def health() -> dict[str, str]:
@@ -93,7 +204,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             if not isinstance(event, dict):
                 raise ValueError('Invalid event')
             return channels.sms_inbound(event)
-        except (ValueError, TypeError, RecursionError, ChannelUnavailable):
+        except (ValueError, TypeError, RecursionError):
             return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
 
     return app

@@ -62,6 +62,10 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            columns = {row['name'] for row in connection.execute('PRAGMA table_info(messages)')}
+            for name, definition in (('inbound_data', 'TEXT'), ('processing_complete', 'INTEGER NOT NULL DEFAULT 0')):
+                if name not in columns:
+                    connection.execute(f'ALTER TABLE messages ADD COLUMN {name} {definition}')
 
     def get(self, key: str, default: Any = None) -> Any:
         with self.connect() as connection:

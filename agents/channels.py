@@ -3,15 +3,15 @@ from dataclasses import dataclass, field
 import hashlib
 import hmac
 import os
-import sqlite3
 import time
-from typing import Any
+from threading import RLock
+from typing import Any, Callable
 from urllib.parse import urlencode, urlsplit
 import httpx
 from pydantic import Field
 from .contacts import Contacts
 from .db import Database, identifier, utc_now
-from .models import Channel, Model
+from .models import Channel, Mode, Model
 
 FIXTURE_SENDER = '+620000000001'  # Deliberately synthetic; never sent to a provider.
 
@@ -43,6 +43,11 @@ class Inbound(Model):
     responder_id: str
     channel: Channel
     text: str = Field(min_length=1, max_length=500)
+    mode: Mode | None = None
+    day: int | None = Field(default=None, ge=0, le=61)
+    processing_id: str | None = None
+    confirmation_report: dict[str, Any] | None = None
+    context_captured: bool = False
 
 
 def verify_webhook(settings: ChannelSettings, key: str | None, raw: bytes,
@@ -110,6 +115,9 @@ class ChannelAdapter:
     def __init__(self, database: Database, settings: ChannelSettings, *, transport: httpx.BaseTransport | None = None):
         self.db, self.settings = database, settings
         self.gateway = Gateway(settings, transport=transport)
+        self.on_inbound: Callable[[Inbound], dict[str, Any]] | None = None
+        self.prepare_inbound: Callable[[Inbound], Inbound] | None = None
+        self._inbound_lock = RLock()
 
     def contacts(self) -> Contacts:
         if self.settings.public_demo:
@@ -140,19 +148,36 @@ class ChannelAdapter:
         return {'message_id': message_id, 'status': status}
 
     def inbound(self, message: Inbound, *, external_id: str | None = None) -> dict[str, Any]:
+        # Single-process app serializes duplicate delivery while callbacks run outside
+        # SQLite transactions. Persisted pending rows resume after transient failures.
+        with self._inbound_lock:
+            return self._inbound(message, external_id=external_id)
+
+    def _inbound(self, message: Inbound, *, external_id: str | None = None) -> dict[str, Any]:
         if not message.text.strip():
             raise ValueError('Empty inbound message')
+        duplicate = False
         with self.db.connect() as connection:
             if not connection.execute('SELECT 1 FROM responders WHERE id=?', (message.responder_id,)).fetchone():
                 raise ValueError('Unknown responder')
-            try:
-                connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,status,inbound_message_id,created_at) VALUES(?,?,?,?,?,?,?,?)',
-                    (identifier('m'), message.responder_id, 'inbound', message.channel, message.text, 'received', external_id, utc_now()))
-            except sqlite3.IntegrityError:
-                if external_id and connection.execute('SELECT 1 FROM messages WHERE inbound_message_id=?', (external_id,)).fetchone():
+            existing = connection.execute('SELECT * FROM messages WHERE inbound_message_id=?', (external_id,)).fetchone() if external_id else None
+            if existing:
+                duplicate = True
+                if existing['processing_complete']:
                     return {'accepted': True, 'duplicate': True}
-                raise
-        return {'accepted': True, 'duplicate': False}
+                message = Inbound.model_validate_json(existing['inbound_data']) if existing['inbound_data'] else Inbound(
+                    responder_id=existing['responder_id'], channel=existing['channel'], text=existing['body'], processing_id=existing['id'])
+            else:
+                message = self.prepare_inbound(message) if self.prepare_inbound else message
+                message = message.model_copy(update={'processing_id': identifier('m')})
+                connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,status,inbound_message_id,created_at,inbound_data) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (message.processing_id, message.responder_id, 'inbound', message.channel, message.text, 'received', external_id, utc_now(), message.model_dump_json()))
+        result = {'accepted': True, 'duplicate': duplicate}
+        if self.on_inbound is not None:
+            result.update(self.on_inbound(message))
+        with self.db.connect() as connection:
+            connection.execute('UPDATE messages SET processing_complete=1 WHERE id=?', (message.processing_id,))
+        return result
 
     def sms_inbound(self, event: dict[str, Any]) -> dict[str, Any]:
         payload = event.get('payload', {})
@@ -165,4 +190,5 @@ class ChannelAdapter:
         if not responder_id:
             # Unknown senders are acknowledged, never bound or contacted automatically.
             return {'accepted': True, 'duplicate': False}
-        return self.inbound(Inbound(responder_id=responder_id, channel='sms', text=text), external_id='sms:' + external_id)
+        result = self.inbound(Inbound(responder_id=responder_id, channel='sms', text=text), external_id='sms:' + external_id)
+        return {'accepted': result['accepted'], 'duplicate': result['duplicate']}

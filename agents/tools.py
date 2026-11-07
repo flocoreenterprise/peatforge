@@ -79,13 +79,15 @@ class ToolService:
             return Landmark(landmark_id=None, name=None, lat=None, lon=None, match_score=score)
         return Landmark(landmark_id=row['id'], name=row['name'], lat=row['lat'], lon=row['lon'], match_score=score, source=row['source'])
 
-    def log_field_observation(self, observation: ObservationInput) -> dict[str, Any]:
+    def log_field_observation(self, observation: ObservationInput, *, observation_id: str | None = None) -> dict[str, Any]:
         if not observation.confirmed:
             raise ValueError('Standalone confirmation required')
-        snapshot = self.get_village_status(observation.village_id, observation.mode, observation.day).model_dump()
-        observation_id = identifier('o')
+        observation_id = observation_id or identifier('o')
         with self.db.connect() as connection:
-            connection.execute('INSERT INTO observations(id,village_id,responder_id,anonymous,confirmed,pre_update_model,data,created_at) VALUES(?,?,?,?,?,?,?,?)',
+            existing = connection.execute('SELECT pre_update_model FROM observations WHERE id=?', (observation_id,)).fetchone()
+        snapshot = json.loads(existing['pre_update_model']) if existing else self.get_village_status(observation.village_id, observation.mode, observation.day).model_dump()
+        with self.db.connect() as connection:
+            connection.execute('INSERT OR IGNORE INTO observations(id,village_id,responder_id,anonymous,confirmed,pre_update_model,data,created_at) VALUES(?,?,?,?,?,?,?,?)',
                 (observation_id, observation.village_id, observation.responder_id, int(observation.anonymous), 1,
                  json.dumps(snapshot, allow_nan=False), observation.model_dump_json(), utc_now()))
         return dict(observation_id=observation_id, old=snapshot, new=snapshot,

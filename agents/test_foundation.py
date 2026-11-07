@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from engine.service import EngineService
+from engine.ingest import Ingest
 from .app import RUNTIME_DIR, create_app, public_demo_setting
 from .brain import OfflineBrain, safe_rewrite
 from .db import Database
@@ -91,9 +93,9 @@ class FoundationTests(unittest.TestCase):
     def test_application_health_uses_temporary_database(self):
         with TestClient(create_app(db_path=Path(self.temp.name) / 'app.sqlite3')) as client:
             self.assertEqual(client.get('/api/health').json(), {'status': 'ok'})
-            self.assertEqual(client.get('/api/responders').status_code, 404)
+            self.assertEqual(client.get('/api/responders').status_code, 200)
 
-    def test_public_demo_default_and_forced_mock(self):
+    def test_public_demo_default_and_mock_outbound_independent_source(self):
         for value in (None, '', '  ', 'true', 'TRUE'):
             self.assertTrue(public_demo_setting(value))
         self.assertFalse(public_demo_setting('false'))
@@ -103,6 +105,7 @@ class FoundationTests(unittest.TestCase):
             app = create_app(mock=False)
         self.assertTrue(app.state.public_demo)
         self.assertEqual(app.state.config['mode'], 'mock')
+        self.assertEqual(app.state.config['source'], 'live')
         self.assertEqual(app.state.database_path, (RUNTIME_DIR / 'demo.sqlite3').resolve())
 
     def test_protected_default_path_and_false_config(self):
@@ -134,10 +137,12 @@ class FoundationTests(unittest.TestCase):
             with TestClient(create_app(db_path=self.db.path, public_demo=True)):
                 pass
 
-    def test_public_demo_never_imports_real_engine(self):
+    def test_public_demo_uses_computed_engine_with_fixture_input(self):
         with patch('agents.tools.importlib.import_module', side_effect=AssertionError('must not import')):
-            with TestClient(create_app(db_path=Path(self.temp.name) / 'public.sqlite3', public_demo=True, mock=False)) as client:
+            engine = EngineService(Ingest())
+            with TestClient(create_app(db_path=Path(self.temp.name) / 'public.sqlite3', public_demo=True, engine=engine)) as client:
                 self.assertTrue(client.app.state.tools.mock)
+                self.assertIs(client.app.state.tools.engine, engine)
                 self.assertEqual(client.app.state.tools.get_village_status(VILLAGE_ID).source, 'fixture')
 
 

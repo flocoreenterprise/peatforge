@@ -25,25 +25,28 @@ Return files changed, test commands with pass/fail, open risks. Orchestrator com
 
 From repository root: `.venv/Scripts/python.exe -m unittest agents.test_foundation -v`.
 Run service: `.venv/Scripts/python.exe -m uvicorn agents.app:app --port 8000`.
-Only health is mounted at this stage; tools are internal server functions.
+Engine reads, internal tools, and the minimal demo/operator routes are mounted.
 No `.env` file is loaded and no provider SDK or network call is used.
 
 `create_app(db_path=temporary_path, mock=True)` injects isolated state. Runtime defaults
 to `runtime/agents/demo.sqlite3` in public demo and `runtime/agents/state.sqlite3`
 in protected mode; `PEATFORGE_DB_PATH` overrides it with the same isolation checks.
 `PUBLIC_DEMO` defaults true when blank/unset; false selects protected scope.
-Public demo currently forces MockEngine and mock outbound even if real mode is
-requested. Fresh custom paths receive a scope marker; cross-scope reuse and
-unmarked populated demo databases are rejected before fixture seeding.
-Engine defaults to synthetic fixtures. `PEATFORGE_ENGINE_MODE=real` lazily imports
-`engine.service`; failures propagate without fixture fallback. Real signature integration
-must be checked when engine is ready. Fixture simulation intentionally returns no Days Bought.
+Public demo forces mock outbound; environmental inputs are independent.
+Fresh custom paths receive a scope marker; cross-scope reuse and unmarked populated
+demo databases are rejected before fixture seeding.
+The app now uses one actual `EngineService` instance for tools and engine routes.
+`PEATFORGE_DATA_SOURCE` defaults `live` (public providers/cache); `fixture` explicitly
+selects synthetic inputs for tests. Missing provider data remains unavailable.
+The legacy ToolService MockEngine remains only for isolated foundational tests.
+`PEATFORGE_ENGINE_MODE` and the legacy create_app mock argument no longer select
+application scientific inputs; use data_source or an injected engine instead.
 `seed_mock` is explicit and has no phone numbers, consent or field tokens.
 
 `ToolService` exposes status, forecast, simulation, canals, resources, hotspots,
 landmark resolution, confirmed observation storage and mock notification. Observation
-storage retains the model snapshot; recalibration and the verification pipeline arrive
-in B3/B5. `OfflineBrain` is default; `safe_rewrite` only accepts wording preserving
+storage retains the model snapshot; adaptive recalibration is cut and verification
+arrives in B5. `OfflineBrain` is default; `safe_rewrite` only accepts wording preserving
 numeric tokens and URLs within the message limit. No OpenAI calls are implemented.
 
 ## B2 channels
@@ -81,3 +84,36 @@ https://api.sms-gate.app/docs/index.html . No provider action has been tested li
 
 Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels -v`.
 Tunnel lifecycle scripts remain orchestrator-owned outside this folder.
+
+## B3 Warden and core integration
+
+`POST /api/demo/inbound` accepts responder_id/text/mode/day in public demo only.
+It goes through the SAME ChannelAdapter and Warden pipeline as authenticated inbound
+SMS. Reports persist pending state in SQLite, read back facts, and save only on
+standalone YA/IYA. Embedded ASAP YA and unrelated phrases cannot confirm. New reports
+replace pending facts; TIDAK, implausible values, and new alerts clear them. Arabic
+numbers, basic Bahasa number words and cm/m units are parsed deterministically.
+Replay context is retained across confirmation, even if the browser changes context.
+Confirmed observations retain the pre-update model snapshot; there is no adaptation.
+Inbound receipts also retain their original normalized payload/context and a durable
+completion flag. Failed processing resumes on the same provider ID; only completed
+receipts are skipped. Confirmation checkpoints retain a stable observation ID, so a
+failed post-confirm hook resumes without inserting a second observation. B5 hooks
+must themselves be idempotent by observation ID. Transient channel/data failures
+return 503 rather than a malformed-input response. The app runs as one process;
+in-process locks serialize duplicate callback handling.
+
+`GET /api/config`, `/api/responders`, `/api/responders/{id}/messages` and engine
+routes share an operator dependency. Public demo opens them; protected operation
+fails closed with 401 until PIN support is implemented. Contact ciphertext, hashes,
+tokens, full phone numbers and provider credentials are never selected for responses.
+Five synthetic responders correspond to the pilot villages, without real contacts.
+The minimal `/api/events/risk-changed` route is a manual MOCK alert trigger. It uses
+actual engine facts, resets pending context and never changes model levels to match
+an optional demo override. Full B4 scheduling and phone calls are not implemented.
+
+Full anonymity is cut: ANONIM gets an explicit unavailable message and is not saved
+as an anonymous report. No unsupported anonymity promise is made. B5 will attach
+Planner/Verifier to Warden.after_confirm and complete the proposal approval loop.
+
+Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels agents.test_warden -v`.
