@@ -125,14 +125,21 @@ class ChannelAdapter:
             raise ChannelUnavailable('Real contacts disabled in public demo')
         return Contacts(self.db, self.settings.encryption_key, self.settings.phone_salt)
 
-    def send(self, responder_id: str, text: str, channel: Channel = 'sms', *, speech: str | None = None, trace_id: str | None = None) -> dict[str, str]:
-        if channel not in ('sms', 'web') or not text.strip() or len(text) > 300:
+    def send(self, responder_id: str, text: str, channel: Channel = 'sms', *, speech: str | None = None, trace_id: str | None = None,
+             mock_only: bool = False, idempotency_key: str | None = None) -> dict[str, str]:
+        if channel not in (('sms','web','voice') if mock_only else ('sms', 'web')) or not text.strip() or len(text) > 300:
             raise ValueError('Invalid outbound message')
         with self.db.connect() as connection:
             if not connection.execute('SELECT 1 FROM responders WHERE id=?', (responder_id,)).fetchone():
                 raise ValueError('Unknown responder')
-        message_id = identifier('m')
-        status = 'mock' if self.settings.public_demo or channel == 'web' else 'pending'
+            if idempotency_key:
+                existing=connection.execute('SELECT responder_id,channel,status FROM messages WHERE id=?',(idempotency_key,)).fetchone()
+                if existing:
+                    if existing['responder_id']!=responder_id or existing['channel']!=channel:
+                        raise ValueError('Message receipt scope mismatch')
+                    return {'message_id':idempotency_key,'status':existing['status']}
+        message_id = idempotency_key or identifier('m')
+        status = 'mock' if mock_only or self.settings.public_demo or channel == 'web' else 'pending'
         with self.db.connect() as connection:
             connection.execute('INSERT INTO messages(id,responder_id,direction,channel,body,speech,status,trace_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
                 (message_id, responder_id, 'outbound', channel, text, speech, status, trace_id, utc_now()))

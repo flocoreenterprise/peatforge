@@ -94,7 +94,9 @@ standalone YA/IYA. Embedded ASAP YA and unrelated phrases cannot confirm. New re
 replace pending facts; TIDAK, implausible values, and new alerts clear them. Arabic
 numbers, basic Bahasa number words and cm/m units are parsed deterministically.
 Replay context is retained across confirmation, even if the browser changes context.
-Confirmed observations retain the pre-update model snapshot; there is no adaptation.
+Confirmed observations retain the pre-update model snapshot. The reopened A6 path
+now assimilates plausible confirmed LIVE WT into bounded initial conditions only;
+replay and >30cm disagreement never adapt. Original snapshots survive retries.
 Inbound receipts also retain their original normalized payload/context and a durable
 completion flag. Failed processing resumes on the same provider ID; only completed
 receipts are skipped. Confirmation checkpoints retain a stable observation ID, so a
@@ -127,7 +129,7 @@ replay detections produce a flag, never a check against live detections.
 Planner simulates selected canal blocking and pump standby with deterministic tools,
 using a clearly labelled 60cm scenario raise. It retains positive hydraulic benefit
 even when Days Bought is null or zero, drops zero benefit, and inserts at most two
-ranked proposals. No adaptive update or accuracy claim is performed.
+ranked proposals. No accuracy improvement or K/Sy fitting is claimed.
 
 Action insertion and the pipeline completion receipt share one transaction. Proposed
 items expire after six hours; newer same-village/type proposals supersede proposed

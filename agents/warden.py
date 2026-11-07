@@ -6,6 +6,7 @@ from .channels import ChannelAdapter, Inbound
 from .db import Database
 from .models import ObservationInput
 from .tools import ToolService
+from .events import record
 
 _ONES = dict(zip(('nol', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan'), range(10)))
 _NUMBER_WORDS = set(_ONES) | {'sepuluh', 'sebelas', 'belas', 'puluh', 'seratus', 'ratus', 'koma'}
@@ -93,6 +94,7 @@ class Warden:
         self.db, self.tools, self.channels = database, tools, channels
         self._lock = RLock()
         self.after_confirm: Callable[[dict, dict], Any] | None = None
+        self.on_call: Callable[...,dict] | None = None
 
     def _key(self, responder_id: str) -> str:
         return 'warden:' + responder_id
@@ -130,7 +132,7 @@ class Warden:
         observation = ObservationInput(**checkpoint['observation'], confirmed=True)
         saved = checkpoint.get('saved')
         if saved is None:
-            saved = self.tools.log_field_observation(observation, observation_id='o_' + (message.processing_id or key))
+            saved = self.tools.log_field_observation(observation, observation_id='o_' + (message.processing_id or key),trace_id=checkpoint.get('trace_id'))
             saved['trace_id'] = checkpoint.get('trace_id')
             checkpoint['saved'] = saved
             self.db.set(checkpoint_key, checkpoint)
@@ -147,8 +149,11 @@ class Warden:
             self.db.set(checkpoint_key, checkpoint)
         return self._reply(message, state, 'Terima kasih. Laporan terkonfirmasi telah dicatat untuk ditinjau petugas.', observation_id=saved['observation_id'])
 
-    def _reply(self, message: Inbound, state: dict, text: str, **extra) -> dict:
-        self.channels.send(message.responder_id, text, message.channel if message.channel in ('sms', 'web') else 'web', trace_id=state.get('trace_id'))
+    def _reply(self, message: Inbound, state: dict, text: str, *, event='reply', **extra) -> dict:
+        sent=self.channels.send(message.responder_id, text, message.channel if message.channel in ('sms', 'web') else 'web', trace_id=state.get('trace_id'))
+        record(self.db,'Warden',event,trace_id=state.get('trace_id'),
+               input={'responder_id':message.responder_id,'mode':state.get('mode','live'),'day':state.get('day',0)},
+               output={'state':state['state'],'message_id':sent['message_id']})
         return {'items': message_items(self.db, message.responder_id), 'state': state['state'], **extra}
 
     def handle(self, message: Inbound) -> dict:
@@ -179,6 +184,10 @@ class Warden:
         if standalone in ('ini siapa', 'siapa ini'):
             return self._reply(message, state, 'Ini Warden Peatforge, pencatat laporan untuk ditinjau petugas. Kanal demo memakai simulasi pengiriman.')
         if standalone in ('telp', 'telepon'):
+            if self.on_call:
+                result=self.on_call(message.responder_id,state.get('mode','live'),state.get('day',0))
+                text='Simulasi panggilan dicatat. Tidak ada telepon nyata.' if result['status']=='mock' else 'Permintaan panggilan ditunda oleh kebijakan waktu atau batas kontak. Silakan kirim laporan melalui pesan.'
+                return self._reply(message,state,text)
             return self._reply(message, state, 'Panggilan belum tersedia. Silakan kirim AIR dalam cm dan ASAP YA atau TIDAK melalui pesan.')
         facts, clarify = parse_report(text)
         if clarify:
@@ -208,5 +217,5 @@ class Warden:
                 parts.append('asap ada' if observation.smoke else 'asap tidak ada')
             if landmark.name:
                 parts.append(landmark.name)
-            return self._reply(message, state, 'Baca ulang: ' + ', '.join(parts) + '. Balas YA untuk menyimpan atau TIDAK untuk koreksi.')
+            return self._reply(message, state, 'Baca ulang: ' + ', '.join(parts) + '. Balas YA untuk menyimpan atau TIDAK untuk koreksi.',event='readback')
         return self._reply(message, state, 'Mohon kirim laporan AIR dalam cm dan ASAP YA atau TIDAK. Konfirmasi laporan hanya dengan pesan YA tersendiri.')

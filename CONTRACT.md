@@ -245,3 +245,11 @@ PIN auth, replay. Then B6a. Optional: national/QA, 3D, Realtime, Telegram, backt
 Auditor after blocks, security after boundaries, manual cloud/tunnel screenshots at 1440/1024/390 after web screens.
 Missing cloud access is an open risk, never a passed manual QA claim. Persist tests/QA results in each task report.
 No live external communication during build until provider setup and the chosen test recipient are confirmed.
+
+## Extension API agreement after core gate10:50
+- POST /api/scout/tick {mode,day} -> {mode,day,items:[{village_id,level,previous_level,notified,suppressed,reason,trace_id?}],notified,suppressed,rewound}; operator auth, idempotent4s polling and background worker.
+- GET /api/policy returns code-enforced quiet hours and voice limits. GET /api/trace returns existing redacted AgentEvent items.
+- A6 EngineService.recalibrate(village_id,observation,observation_id) returns {old,new,version,recalibrated,reason}; confirmedliveWT only, bounded initial-condition assimilation, not K/Sy calibration. Replay skipped. Original evidence retained.
+- Parameter history includes before/after and triggering observation. Engine state is separate per public/protected scope, in-memory bydefault in tests.
+- B8 activates existing planned operator auth and scoped field routes. No random/printed fallbackPIN. Missingsecrets failclosed. Publicdemo remainsdefault.
+- C5 trace enabled bylatestuser. C7limitedprovincecounts mayuse attributed public administrative polygons; no nationalrisk/A7classificationclaims.

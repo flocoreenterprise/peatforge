@@ -86,3 +86,12 @@ Hard rules:
 - Builders check only owned modules; root full suite/build at merge. No docs-only commits; BUILDLOG one line/task.
 - Luna audits11:30 and12:15, max5min each; Terra screenshots once12:15; security once before tunnel opens.
 - Report blockers only until12:00. Existing cuts, secret boundaries and13:00 freeze remain.
+
+## Extension block authorized after core gate at10:50
+- Latest user explicitly reopens B4 Scout/autonomy, A6 adaptive, C5 trace and B8 PIN/scoped links; C7 light province hotspot counts if slot frees.
+- Targets: B4+A6 by11:30, C5 by11:45, B8 by12:00. One agents owner runs B4 then B8; engine and trace run parallel.
+- Three active subagents maximum plus root (runtime limit). Sol low/medium. Root owns wiring and full merge checks.
+- Stop visual polishing. One Luna audit and one Terra1440/1024/390 pass at12:15; fixP0/P1only. This supersedes earlier11:30audit slot.
+- At12:30 report readiness for realSMS/phone UAT; user enterskeys onlythroughset-secrets.ps1. Freeze13:00.
+- A6 replay still skipsrecalibration perprompt; keep pre-update discrepancy. Singleobservation assimilation is not independent field calibration.
+- A7/3D/Telegram/Realtime/askbar remaincut. C7limitedcounts only, no nationwide peat-risk claims.

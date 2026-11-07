@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from .db import Database, identifier, utc_now
 from .mock_engine import MockEngine, VILLAGE_ID
 from .models import Channel, ForecastPoint, Landmark, Mode, ObservationInput, Simulation, SimulationRequest, Status
+from .events import record
 
 
 class Engine(Protocol):
@@ -80,10 +81,13 @@ class ToolService:
             return Landmark(landmark_id=None, name=None, lat=None, lon=None, match_score=score)
         return Landmark(landmark_id=row['id'], name=row['name'], lat=row['lat'], lon=row['lon'], match_score=score, source=row['source'])
 
-    def log_field_observation(self, observation: ObservationInput, *, observation_id: str | None = None) -> dict[str, Any]:
+    def log_field_observation(self, observation: ObservationInput, *, observation_id: str | None = None, trace_id: str | None = None) -> dict[str, Any]:
         if not observation.confirmed:
             raise ValueError('Standalone confirmation required')
         observation_id = observation_id or identifier('o')
+        completed=self.db.get('observation-result:'+observation_id)
+        if completed is not None:
+            return completed
         with self.db.connect() as connection:
             existing = connection.execute('SELECT pre_update_model FROM observations WHERE id=?', (observation_id,)).fetchone()
         snapshot = json.loads(existing['pre_update_model']) if existing else self.get_village_status(observation.village_id, observation.mode, observation.day).model_dump()
@@ -91,8 +95,30 @@ class ToolService:
             connection.execute('INSERT OR IGNORE INTO observations(id,village_id,responder_id,anonymous,confirmed,pre_update_model,data,created_at) VALUES(?,?,?,?,?,?,?,?)',
                 (observation_id, observation.village_id, observation.responder_id, int(observation.anonymous), 1,
                  json.dumps(snapshot, allow_nan=False), observation.model_dump_json(), utc_now()))
-        return dict(observation_id=observation_id, old=snapshot, new=snapshot,
-                    recalibrated=False, reason='replay_skips_recalibration' if observation.mode == 'replay' else 'B1_storage_only')
+        reason='replay_skips_recalibration' if observation.mode=='replay' else 'adaptation_unavailable'
+        difference=None if observation.wt_cm is None or snapshot.get('wt_cm') is None else abs(observation.wt_cm-snapshot['wt_cm'])
+        result=dict(observation_id=observation_id,old=snapshot,new=snapshot,recalibrated=False,reason=reason,trace_id=trace_id)
+        history=getattr(self.engine,'params_history',None)
+        versions=history(observation.village_id) if history else []
+        result['version']=versions[-1]['version'] if versions else None
+        recalibrate=getattr(self.engine,'recalibrate',None)
+        if observation.mode=='live' and observation.wt_cm is not None:
+            if difference is not None and difference>30:
+                result['reason']='discrepancy_requires_verification'
+            elif recalibrate is not None:
+                result={**recalibrate(observation.village_id,observation.model_dump(),observation_id),
+                        'old':snapshot,'observation_id':observation_id,'trace_id':trace_id}
+        elif observation.mode=='replay' and observation.wt_cm is not None and recalibrate is not None:
+            result={**recalibrate(observation.village_id,observation.model_dump(),observation_id),
+                    'old':snapshot,'observation_id':observation_id,'trace_id':trace_id}
+        elif observation.wt_cm is None:
+            result['reason']='no_water_depth'
+        self.db.set('observation-result:'+observation_id,result)
+        record(self.db,'Warden','observation_confirmed',trace_id=trace_id,
+               input={'village_id':observation.village_id,'responder_id':observation.responder_id,'mode':observation.mode,'day':observation.day},
+               output={'observation_id':observation_id,'recalibrated':result['recalibrated'],'reason':result['reason'],
+                       'version':result.get('version'),'difference_cm':difference},event_id='e_observation_'+observation_id)
+        return result
 
     def notify(self, responder_id: str, text: str, channel: Channel = 'sms', trace_id: str | None = None) -> dict[str, str]:
         if self.channels is not None:

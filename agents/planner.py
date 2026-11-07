@@ -9,6 +9,7 @@ from .channels import ChannelAdapter, ChannelUnavailable
 from .db import Database, identifier
 from .models import SimulationRequest
 from .tools import ToolService
+from .events import record
 
 
 def verify_benefit(proposal: dict, result: dict) -> bool:
@@ -132,6 +133,17 @@ class Planner:
                     connection.execute('INSERT INTO actions(id,village_id,kind,type,status,benefit,approved_by,expires_at,observation_id,responder_id,anonymous,trace_id,data,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (action['id'], action['village_id'], action['kind'], action['type'], 'proposed', json.dumps(action['benefit'], allow_nan=False), None,
                          action['expires_at'], action['observation_id'], action['responder_id'], 0, action['trace_id'], json.dumps(action, allow_nan=False), action['created_at']))
+                trace=saved.get('trace_id')
+                record(self.db,'Verifier','evidence_checked',trace_id=trace,
+                       input={'observation_id':saved['observation_id'],'village_id':observation['village_id'],'mode':observation['mode'],'day':observation['day']},
+                       output={'decision':decision,'checks':checks},event_id='e_verifier_'+saved['observation_id'],connection=connection)
+                record(self.db,'Planner','proposals_created',trace_id=trace,
+                       input={'observation_id':saved['observation_id'],'mode':observation['mode'],'day':observation['day']},
+                       output={'action_ids':ids},tool_calls=[{'name':'simulate_intervention',
+                            'arguments':{'village_id':action['village_id'],**action['simulation_request']},
+                            'result':{key:action['simulation'][key] for key in ('days_bought','at_least_days','reason','wt_gain_cm','pfvi_reduction','baseline_critical_date','scenario_critical_date')}}
+                            for action in candidates if action['kind']=='proposal'],
+                       event_id='e_planner_'+saved['observation_id'],connection=connection)
                 connection.execute('INSERT INTO kv(key,value) VALUES(?,?)', (receipt, json.dumps(ids)))
             return ids
 
@@ -178,6 +190,11 @@ class Planner:
                 action['followup_message_id'] = followup_id
             connection.execute('UPDATE actions SET status=?,approved_by=?,data=? WHERE id=?',
                                (target, action['approved_by'], json.dumps(action, allow_nan=False), action_id))
+            record(self.db,'Operator',target,trace_id=action['trace_id'],input={'action_id':action_id,'mode':action['mode'],'day':action['day']},
+                   output={'status':target},event_id='e_operator_'+operation+'_'+action_id,connection=connection)
+            if operation=='approve':
+                record(self.db,'Warden','followup_sent',trace_id=action['trace_id'],input={'action_id':action_id,'responder_id':action['responder_id']},
+                       output={'message_id':action['followup_message_id'],'status':'mock'},event_id='e_followup_'+action_id,connection=connection)
             return action
 
     def progress(self, responder_id: str) -> dict:

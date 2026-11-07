@@ -1,9 +1,10 @@
 """Main service skeleton. Operator routers will mount behind shared auth in B8."""
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 import json
 import os
 from pathlib import Path
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import Field
@@ -15,10 +16,12 @@ from engine.villages import list_villages
 from .brain import OfflineBrain
 from .channels import ChannelAdapter, ChannelSettings, ChannelUnavailable, Inbound, verify_webhook
 from .db import Database, identifier
-from .models import Level, Mode, Model
+from .models import Level, Mode, Model, ObservationInput
 from .tools import ToolService, seed_mock
 from .warden import Warden, message_items
 from .planner import Planner
+from .scout import POLICY, Scout
+from .events import list_events, record
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
 
@@ -75,16 +78,25 @@ class EmptyInput(Model):
     pass
 
 
+class ScoutTick(Model):
+    mode: Mode = 'live'
+    day: int = Field(default=0,ge=0,le=61)
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
-               data_source: str | None = None, web_dist: Path | None = None) -> FastAPI:
+               data_source: str | None = None, web_dist: Path | None = None,
+               background_scout: bool | None = None) -> FastAPI:
     public_demo = public_demo_setting(os.environ.get('PUBLIC_DEMO')) if public_demo is None else public_demo
     source = data_source or os.environ.get('PEATFORGE_DATA_SOURCE', '').strip() or 'live'
     if source not in ('live', 'fixture'):
         raise ValueError('PEATFORGE_DATA_SOURCE must be live or fixture')
     # Auth and channels do not select environmental inputs. No network at construction.
-    engine = engine if engine is not None else EngineService(Ingest() if source == 'fixture' else None)
+    injected_engine=engine is not None
+    engine = engine if engine is not None else EngineService(Ingest() if source == 'fixture' else None,
+                state_path=RUNTIME_DIR.parent/'engine'/('demo-adaptive.json' if public_demo else 'protected-adaptive.json'))
     source = engine.ingest.mode
+    background_enabled=(not injected_engine and db_path is None and source=='live') if background_scout is None else background_scout
     default_path = RUNTIME_DIR / ('demo.sqlite3' if public_demo else 'state.sqlite3')
     configured_path = os.environ.get('PEATFORGE_DB_PATH', '').strip()
     path = Path(db_path if db_path is not None else configured_path or default_path).resolve()
@@ -116,15 +128,33 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.channels.prepare_inbound = app.state.warden.prepare
         app.state.planner = Planner(database, app.state.tools, app.state.channels)
         app.state.warden.after_confirm = app.state.planner.process
+        app.state.scout=Scout(database,app.state.tools,app.state.channels,app.state.warden)
+        app.state.warden.on_call=app.state.scout.place_call
         app.state.brain = OfflineBrain()
-        yield
+        async def run_scout():
+            while True:
+                await asyncio.sleep(4)
+                try:
+                    await asyncio.to_thread(app.state.scout.tick,'live',0,background=True)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    record(database,'Scout','background_unavailable',trace_id=None,output={'reason':'unavailable'},event_id='e_scout_background_unavailable')
+        task=asyncio.create_task(run_scout()) if background_enabled else None
+        try:
+            yield
+        finally:
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(title='Peatforge', lifespan=lifespan)
     app.state.public_demo = public_demo
     app.state.database_path = path
     app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
                             source=source, engine='deterministic', outbound='mock' if public_demo else 'configured_only',
-                            poll_ms=4000, field_poll_ms=3000, voice_available=False)
+                            poll_ms=4000, field_poll_ms=3000, voice_available=False,scout_background=background_enabled)
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValueError)
@@ -177,21 +207,23 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
 
     @operator.post('/events/risk-changed')
     def risk_changed(body: DemoAlert):
-        if not public_demo:
-            raise HTTPException(403, 'Demo only')
-        status = app.state.tools.get_village_status(body.village_id, body.mode, body.day)
-        if status.pfvi is None or status.wt_cm is None:
-            raise DataUnavailable('Alert facts unavailable')
-        trace_id = identifier('t')
-        with app.state.database.connect() as connection:
-            rows = connection.execute('SELECT id FROM responders WHERE village_id=?', (body.village_id,)).fetchall()
-        for row in rows:
-            app.state.warden.reset_for_alert(row['id'], body.mode, body.day, trace_id)
-            text = f'Simulasi notifikasi. Tingkat model {status.level}; indeks {status.pfvi:g}; air {status.wt_cm:g} cm (perkiraan model, belum diukur). Balas AIR dalam cm dan ASAP YA atau TIDAK.'
-            app.state.channels.send(row['id'], text, 'sms', trace_id=trace_id)
-        return {'trace_id': trace_id, 'notified': len(rows), 'suppressed': 0, 'mock': True,
-                'level': status.level, 'source': status.source, 'mode': body.mode, 'day': body.day,
-                'assumptions': ['Pemicu demo manual; override tidak mengubah fakta model']}
+        return app.state.scout.manual(body.village_id,body.mode,body.day,hour_override=body.hour_override,level_override=body.level_to)
+
+    @operator.post('/scout/tick')
+    def scout_tick(body: ScoutTick):
+        return app.state.scout.tick(body.mode,body.day)
+
+    @operator.get('/policy')
+    def policy():
+        return POLICY
+
+    @operator.get('/trace')
+    def trace(trace_id: str | None=Query(None,max_length=80),after: str | None=Query(None,max_length=40)):
+        return {'items':list_events(app.state.database,trace_id,after)}
+
+    @operator.post('/observations')
+    def observation(body: ObservationInput):
+        return app.state.tools.log_field_observation(body)
 
     @operator.get('/actions')
     def actions(village_id: str | None = None, include_old: bool = False):

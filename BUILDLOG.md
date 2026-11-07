@@ -80,3 +80,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - Integration: cloud SMS loop passed through approval + exact1day mock follow-up; fixed external MapLibre worker asset and mjs MIME; fullsuite96+15subtests PASS; compact mobile controls, no duplicate mock banner.
 - Core gate10:50 accepted; pending UI nits for12:15: mobile attribution competes with controls, small chart labels, long assumptions disclosure; no visual polishing now. Eight pending files alreadycommitted484c7e3.
 - A6: bounded per-village initial-WT assimilation, before/after/history and idempotent persistence; engine60 PASS; root ready-block115+15subtests PASS; replay remains unchanged.
+- B4: persisted risk crossings, SMS-first autonomy, quiet21-05 exceptEKSTREM, hard1call/day +30s cooldown, real trace events and A6 bridge; agents55 PASS; root115+15subtests PASS.
