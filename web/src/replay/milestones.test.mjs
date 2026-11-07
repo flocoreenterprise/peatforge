@@ -6,6 +6,7 @@ import vm from 'node:vm';
 const context = { exports: {} };
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('./milestones.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context);
 const choices = context.exports.milestoneChoices;
+const critical = context.exports.criticalMilestone;
 const items = [
   { kind: 'pfvi_250', day: null, date: null },
   { kind: 'critical', day: 2, date: '2019-06-17' },
@@ -27,4 +28,10 @@ for (const invalid of [
   { day: -1, date: '2019-06-15' }, { day: 1.5, date: '2019-06-15' },
   { day: 9, date: null }, { day: 9, date: 'invalid' },
 ]) assert.equal(choices([{ kind: 'wt_60', ...invalid }])[0].day, null);
-console.log('PASS: 14 replay milestone API mapping assertions; no API requests');
+assert.equal(critical(items).day, 2, 'primary critical jump follows combined API crossing even when WT is later');
+const indexFirst = [{ kind: 'critical', day: 4, date: '2019-06-19' }, { kind: 'pfvi_250', day: 4, date: '2019-06-19' }, { kind: 'wt_60', day: null, date: null }];
+assert.equal(critical(indexFirst).day, 4, 'PFVI-first crossing enables primary critical CTA even when WT threshold never crosses');
+assert.equal(critical(indexFirst).date, '2019-06-19');
+assert.equal(choices(indexFirst)[0].day, null, 'secondary WT jump remains specific and disabled when WT does not cross');
+assert.equal(critical([{ kind: 'wt_60', day: 1, date: '2019-06-16' }]).day, null, 'missing combined engine milestone is never inferred from another threshold');
+console.log('PASS: 19 replay milestone assertions, including PFVI-first combined critical CTA with missing WT; no API requests');

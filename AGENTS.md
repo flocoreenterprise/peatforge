@@ -124,3 +124,9 @@ Hard rules:
 - P0-B public/lapor +QR, anonymousoptional, samepipeline, reporterfollowup, hardserver180svoicecap plusglobal/daily/perIPlimits; reviewsecurityBEFOREtunnel.
 - P0-C per-panel source/freshness and/status, FIRMS15minrefresh. OnlyafterP0green: P1-D arbitrarylocation/BMKGsearch withuncalibratedlabels andconsentedvolunteers/trialverifiedphones; P1-E extendedReplaySep30/leadtime andofflinecachefallback iftime.
 - Solperfolder, Lunaaftereachblockmax5min, Terra1440/1024/390;15:30fullsuitecleancommit,15:45freeze,16:30submission. TunnelclosedunlessrequestedforattendedpublicUAT; no furtherTwiMLcallunlessasked.
+
+## Hard deadline override — 13:14 WIB
+- Feature freeze14:00 supersedes15:45. Commitlayoutnow afterbuild; nofurtherpolishing/visualrechecks.
+- 13:15–13:30 P0-A dispatcherwording/tests;13:30–13:50minimalpublic/lapor+QR+hardcostguards/samequeue;13:50freshnesslabels onlyiftime, no/status.
+- 13:55fullsuite+cleancommit;14:00five-linedone/cutreport. After14:00fixP0only.
+- CUT:anywhere/volunteers,ReplaySeptember,offlinemode,OSMretries. Tunnelremainsclosedunlessrequested; noadditionalcalls.

@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { ArrowRight, Check, ChevronRight, CircleHelp, Fingerprint, Leaf, LockKeyhole, LogOut, Menu, Moon, Radio, RefreshCw, Sun, Trees, Waves, X, Inbox, MapPin, Phone, Workflow } from 'lucide-react';
+import { ArrowRight, Fingerprint, LockKeyhole, LogOut, Moon, RefreshCw, Sun, Trees, Waves, MapPin, Phone, Workflow } from 'lucide-react';
 import { api, ApiError, mockConfig, type Config } from './api';
 import MapCanvas from './map/MapCanvas';
+import type { OsmCanals } from './map/canals';
 import DecisionInbox, { SmsLoop } from './inbox/DecisionInbox';
 import VillageDetail from './village/VillageDetail';
 import AgentTrace from './trace/AgentTrace';
 import FieldInbox from './field/FieldInbox';
 import NationalView from './national/NationalView';
 import ReplayJumps from './replay/ReplayJumps';
-import { usePilot, dateLabel, replayDate, number, type Mode } from './map/pilot';
+import { usePilot, dateLabel, replayDate, type Mode } from './map/pilot';
+import CommandSummary from './layout/CommandSummary';
+import './layout/command.css';
 
-type Tab = 'Keputusan' | 'Desa' | 'Telepon-SMS' | 'Jejak';
-const tabs = [{ name: 'Keputusan', icon: Inbox }, { name: 'Desa', icon: MapPin }, { name: 'Telepon-SMS', icon: Phone }, { name: 'Jejak', icon: Workflow }] as const;
+type Tab = 'Desa' | 'Percakapan' | 'Jejak';
+const tabs = [{ name: 'Desa', icon: MapPin }, { name: 'Percakapan', icon: Phone }, { name: 'Jejak', icon: Workflow }] as const;
 
 function Brand() { return <div className="brand"><span className="brand-icon"><Waves size={23}/></span><span>peatforge<span className="brand-sub">COMMAND</span></span></div>; }
 
@@ -36,13 +39,29 @@ function CommandApp() {
   const [day, setDay] = useState(9);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectVillage = useCallback((id: string) => { setSelectedId(id); setTab('Desa'); }, []);
-  const [drawer, setDrawer] = useState(false);
+  const [osmCanals, setOsmCanals] = useState<OsmCanals | null>(null);
   const pilot = usePilot(phase === 'command' && !preview && scope === 'pilot', mode, day);
   const { villages, risk, hotspots, meta } = pilot;
   const selected = villages.find(v => v.id === selectedId) ?? villages[0];
   const selectedDate = replayDate(meta, day);
   const [connection, setConnection] = useState('');
   const scoutBanner = config?.public_demo ? '' : scoutError;
+
+  useEffect(() => {
+    if (phase !== 'command' || preview || scope !== 'pilot') return;
+    let active = true; let pending = false;
+    const controller = new AbortController();
+    const refresh = async () => {
+      if (pending) return; pending = true;
+      try {
+        const data = await api<OsmCanals>('/canals/osm', { signal: controller.signal });
+        if (active) setOsmCanals(data);
+      } catch { if (active) setOsmCanals({ type: 'FeatureCollection', features: [], available: false, reason: 'Geometri OpenStreetMap belum tersedia.' }); }
+      finally { pending = false; }
+    };
+    void refresh(); const timer = window.setInterval(() => void refresh(), 4000);
+    return () => { active = false; controller.abort(); clearInterval(timer); };
+  }, [phase, preview, scope]);
 
 
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; localStorage.setItem('peatforge-theme', dark ? 'dark' : 'light'); }, [dark]);
@@ -106,33 +125,41 @@ function CommandApp() {
     <section className="login-form-side"><div className="login-top">{themeButton}<span>AKSES OPERATOR</span></div><form onSubmit={login} className="login-form"><div className="login-lock"><Fingerprint size={30}/></div><span className="eyebrow">SELAMAT DATANG KEMBALI</span><h2>Masuk ke Command</h2><p>Gunakan PIN operator untuk membuka wilayah pantauan dan kotak keputusan.</p><label htmlFor="pin">PIN operator</label><input id="pin" type="password" inputMode="numeric" pattern="[0-9]{6}" autoComplete="off" maxLength={6} minLength={6} required value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, ''))} placeholder="••••••" aria-describedby={error ? 'login-error' : 'pin-help'}/><span id="pin-help" className="input-help">Enam digit dari pengelola sistem.</span>{error && <div id="login-error" className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy || pin.length !== 6}>{busy ? 'Memeriksa…' : 'Buka pusat komando'}<ArrowRight size={18}/></button><div className="secure-note"><LockKeyhole size={14}/><span>Sesi terlindungi. Tindakan lapangan tetap memerlukan persetujuan manusia.</span></div></form><footer>Peatforge Command<span>Operator console · v0.1</span></footer></section>
   </main>;
 
-  return <main className="command-screen">
-    <header className="topbar"><Brand/><div className="header-divider"/><button className="text-button scope-switch" onClick={() => setScope(scope === 'pilot' ? 'national' : 'pilot')}>{scope === 'pilot' ? 'Seluruh Indonesia' : 'Wilayah pilot'}</button><div className="topbar-right"><span className="connection-indicator"><i className={connection || preview ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection ? 'Terputus' : 'Terhubung'}</span>{themeButton}{preview ? <button className="text-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={16}/><span>Coba hubungkan</span></button> : !config?.public_demo && <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div></header>
-    <section className={`command-body ${preview || pilot.error || scoutBanner || connection ? 'has-banner' : ''}`}>
-      {scope === 'national' ? <div className="national-shell"><NationalView/></div> : <>
-      <MapCanvas dark={dark} villages={villages} risk={risk} hotspots={hotspots} selectedId={selected?.id ?? null} onSelect={selectVillage}/>
-      <section className="replay-control glass-panel" aria-label="Waktu pantauan"><div className="mode-switch"><button className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>{mode === 'replay' && <div className="replay-slider"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari replay" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/><span>ERA5 · prakiraan sempurna historis</span>{selected && <ReplayJumps villageId={selected.id} onJump={setDay}/>}</div>}</section>
-      <div className="workspace-toolbar"><div className="location-selector"><MapPin size={16}/><span>Wilayah pilot</span></div><span className="live-badge"><Radio size={13}/>{preview ? 'Pratinjau mock' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.outbound === 'mock' || config?.mode === 'mock' ? 'Operator · kanal simulasi' : 'Operator · pengiriman diaktifkan'}</span><button className="drawer-toggle" onClick={() => setDrawer(!drawer)} aria-expanded={drawer} aria-label="Buka panel informasi">{drawer ? <X size={18}/> : <Menu size={18}/>}</button></div>
-      {(preview || pilot.error || scoutBanner || connection) && <div className="environment-banner" role="status">{connection || pilot.error || scoutBanner || (preview ? 'Pratinjau mock — API belum tersedia. Tidak ada data operasional atau pengiriman pesan.' : 'Kanal komunikasi dalam mode simulasi. Sumber data lingkungan ditandai pada tiap hasil.')}</div>}
-      <aside className="operations-panel glass-panel">
-        <div className="panel-topline"><span className="eyebrow">MEJA OPERASI</span><span className="panel-counter">01 / PILOT</span></div>
-        <h1>Gambut terpantau.<br/><span>Keputusan di tangan Anda.</span></h1>
-        <p className="panel-intro">Pantau kondisi desa, dengarkan laporan warga, lalu tentukan langkah berikutnya.</p>
-        <div className="three-stats"><div><strong>{villages.length || '—'}</strong><span>Desa terhubung</span></div><div><strong>{risk ? risk.features.filter(f => ['TINGGI', 'EKSTREM'].includes(f.properties.level)).length : '—'}</strong><span>Risiko tinggi+</span></div><div><strong>{hotspots && hotspots.available !== false ? hotspots.items.length : '—'}</strong><span>Titik panas 72j</span></div></div>
-        <nav className="panel-tabs" aria-label="Panel operasi">{tabs.map(({ name, icon: Icon }) => <button key={name} className={tab === name ? 'active' : ''} onClick={() => setTab(name)}><Icon size={16}/><span>{name}</span></button>)}</nav>
-        <div className="panel-content">
-          {tab === 'Keputusan' && <><DecisionInbox villageId={selected?.id} mode={mode} day={day}/><button className="text-button" onClick={() => setTab('Telepon-SMS')}>Buka alur SMS <ArrowRight size={16}/></button></>}
-          {tab === 'Desa' && <><div className="section-heading"><h2>Wilayah pantauan</h2><span>{pilot.loading ? 'Memuat risiko…' : `${villages.length} desa`}</span></div>{villages.length ? <div className="village-list">{villages.map(village => { const status = risk?.features.find(f => f.properties.village_id === village.id)?.properties; return <button className={`village-row ${village.id === selected?.id ? 'selected' : ''}`} key={village.id} onClick={() => selectVillage(village.id)}><span className="village-icon"><Trees size={18}/></span><div><strong>{village.name}</strong><span>{status ? <><i className={`status-dot ${status.level.toLowerCase()}`}/>PFVI {status.level}{status.wt_cm !== null && status.wt_cm >= 60 ? ' · WT KRITIS' : ''} · {status.stale ? 'cache lama' : status.source === 'fixture' ? 'contoh' : 'model'}</> : 'Risiko belum tersedia'}</span></div><ChevronRight size={16}/></button>; })}</div> : <Empty icon="village" title="Menunggu data desa" text="Lokasi dan kondisi desa tersedia setelah layanan terhubung."/>}{selected && <><h2 className="selected-village-heading">{selected.name}</h2><VillageDetail villageId={selected.id} mode={mode} day={day}/></>}</>}
-          {tab === 'Telepon-SMS' && <><SmsLoop villageId={selected?.id} mode={mode} day={day}/><button className="text-button" onClick={() => setTab('Keputusan')}>Buka kotak keputusan <ArrowRight size={16}/></button></>}
-          {tab === 'Jejak' && <AgentTrace villageId={selected?.id} mode={mode} day={day}/>}
-
+  return <main className="command-screen command-v2">
+    <header className="command-topbar">
+      <Brand/>
+      <button className="command-scope text-button" onClick={() => setScope(scope === 'pilot' ? 'national' : 'pilot')}>{scope === 'pilot' ? 'Pulang Pisau · lihat Indonesia' : 'Indonesia · kembali ke pilot'}</button>
+      {scope === 'pilot' && <div className="command-time-controls" aria-label="Waktu pantauan">
+        <div className="command-mode-switch" role="group" aria-label="Mode waktu"><button aria-pressed={mode === 'live'} className={mode === 'live' ? 'active' : ''} onClick={() => setMode('live')}>Live</button><button aria-pressed={mode === 'replay'} className={mode === 'replay' ? 'active' : ''} onClick={() => setMode('replay')}>Replay 2019</button></div>
+        {mode === 'replay' && <><div className="command-day-control"><label htmlFor="replay-day">{dateLabel(selectedDate)} · hari {day}</label><input id="replay-day" aria-label="Hari putar ulang" type="range" min={0} max={(meta?.days ?? 62) - 1} value={day} onChange={event => setDay(Number(event.target.value))}/></div>{selected && <div className="command-day-jump"><ReplayJumps villageId={selected.id} onJump={setDay} compact/></div>}</>}
+      </div>}
+      <div className="command-topbar-actions"><span className="command-connection"><i className={connection || preview || pilot.error ? 'offline' : ''}/>{preview ? 'Pratinjau lokal' : connection || pilot.error ? 'Pembaruan tertunda' : pilot.synced ? `Diperbarui ${pilot.synced}` : 'Menghubungkan…'}</span>{themeButton}{preview ? <button className="icon-button" aria-label="Coba hubungkan" onClick={() => void initialize()}><RefreshCw size={17}/></button> : !config?.public_demo && <button className="icon-button" aria-label="Keluar dari Command" disabled={busy} onClick={() => void logout()}><LogOut size={18}/></button>}</div>
+    </header>
+    {scope === 'national' ? <section className="command-national"><NationalView/></section> : <>
+      <CommandSummary enabled={!preview} mode={mode} day={day} selectedDate={selectedDate} villages={villages} risk={risk} hotspots={hotspots} osmCanals={osmCanals} synced={pilot.synced} notice={connection || pilot.error || scoutBanner || (preview ? 'Pratinjau — API belum tersedia. Belum ada data operasional; pesan tidak dikirim.' : '')}/>
+      <section className="command-workspace">
+        <section className="command-map" aria-label="Peta wilayah pilot">
+          <MapCanvas dark={dark} villages={villages} risk={risk} hotspots={hotspots} osmCanals={osmCanals} mode={mode} contained hideSourcePanel selectedId={selected?.id ?? null} onSelect={selectVillage}/>
+          <details className="command-map-legend"><summary>Legenda</summary><div className="risk-legend">{['Rendah', 'Sedang', 'Tinggi', 'Ekstrem'].map((level, index) => <div key={level}><i className={`risk-${index}`}/><span>{level}</span></div>)}</div><p>Indeks rawan api (PFVI), bukan konfirmasi api. Air tanah yang dalam juga dapat melewati ambang kritis model.</p></details>
+        </section>
+        <div className="command-sheet">
+          <aside className="command-decisions" aria-label="Keputusan semua desa">
+            <header className="command-panel-heading"><span className="eyebrow">SEMUA DESA · {mode === 'replay' ? dateLabel(selectedDate) : 'KONDISI TERKINI'}</span><h1>Keputusan lapangan</h1><p>Periksa bukti dan manfaat model sebelum menyetujui tindakan. Disetujui belum berarti dilaksanakan.</p><span className="command-channel-status">{preview ? 'Pratinjau tanpa pengiriman' : config?.public_demo ? 'Demo terbuka · kanal simulasi' : config?.outbound === 'mock' || config?.mode === 'mock' ? 'Operator · kanal simulasi' : 'Operator · pengiriman diaktifkan'}</span></header>
+            <DecisionInbox mode={mode} day={day}/>
+          </aside>
+          <aside className="command-context" aria-label="Konteks desa terpilih">
+            <header className="command-context-heading"><label htmlFor="command-village">Desa dipilih</label><select id="command-village" value={selected?.id ?? ''} disabled={!villages.length} onChange={event => selectVillage(event.target.value)}>{!villages.length && <option value="">Belum ada data desa</option>}{villages.map(village => <option key={village.id} value={village.id}>{village.name}</option>)}</select></header>
+            <nav className="command-context-tabs" aria-label="Konteks desa">{tabs.map(({ name, icon: Icon }) => <button key={name} className={tab === name ? 'active' : ''} aria-pressed={tab === name} onClick={() => setTab(name)}><Icon size={16}/><span>{name}</span></button>)}</nav>
+            <div className="command-context-content">
+              {tab === 'Desa' && (selected ? <VillageDetail villageId={selected.id} mode={mode} day={day}/> : <Empty icon="village" title="Belum ada data desa" text="Lokasi dan kondisi desa belum tersedia dari layanan."/>)}
+              {tab === 'Percakapan' && <SmsLoop villageId={selected?.id} mode={mode} day={day}/>}
+              {tab === 'Jejak' && <AgentTrace villageId={selected?.id} mode={mode} day={day}/>}
+            </div>
+            <footer className="command-panel-footer"><span>{pilot.synced ? `Pembaruan ${pilot.synced} WIB` : 'Belum ada pembaruan'}</span><span>{scoutError && config?.public_demo ? 'Pemantauan otomatis belum tersinkron' : 'Diperbarui tiap 4 detik'}</span></footer>
+          </aside>
         </div>
-        <div className="panel-footer"><span><i/>{pilot.synced ? `Sinkron ${pilot.synced} WIB` : 'Belum ada pembaruan'}</span><span>{scoutError && config?.public_demo ? 'Scout belum tersinkron · mencoba lagi' : 'Polling 4 dtk'}</span></div>
-      </aside>
-      <aside className={`context-panel glass-panel ${drawer ? 'drawer-open' : ''}`}><div className="context-heading"><span className="eyebrow">CARA MEMBACA PETA</span><Leaf size={18}/></div><h2>Kenali risikonya.<br/>Periksa buktinya.</h2><p>Warna menunjukkan level PFVI. WT KRITIS berarti kedalaman air ≥60 cm, meski PFVI masih rendah. Data yang belum tersedia tidak berarti aman.</p><div className="risk-legend">{['Rendah', 'Sedang', 'Tinggi', 'Ekstrem'].map((level, i) => <div key={level}><i className={`risk-${i}`}/><span>{level}</span></div>)}</div><div className="model-note"><CircleHelp size={16}/><p>Air tanah: <strong>perkiraan model, belum diukur.</strong> Titik panas adalah deteksi satelit, bukan api terkonfirmasi.</p></div><div className="hotspot-note"><strong>Titik panas · radius 5 km dari desa pilot</strong><p>{hotspots?.available === false ? mode === 'replay' ? 'Arsip titik panas tidak tersedia. Data live tidak diputar ulang.' : 'Data titik panas belum tersedia.' : hotspots ? `${number(hotspots.items.length)} deteksi dalam 72 jam · ${hotspots.source ?? 'NOAA-20/21'}${hotspots.stale ? ' · cache lama' : ''}` : 'Memuat deteksi satelit…'}</p><span>Data per {dateLabel(hotspots?.data_as_of)}</span><p>Oranye: &lt;24 jam · pudar: 24–72 jam.</p></div><div className="context-bottom"><Check size={14}/><span>Manusia memegang keputusan akhir</span></div></aside>
-      <div className="map-bottom-note"><span>WILAYAH PILOT</span><span>Titik desa BMKG · tanpa batas atau geometri kanal</span></div>
-      </>}
-    </section>
+      </section>
+    </>}
   </main>;
 }
 

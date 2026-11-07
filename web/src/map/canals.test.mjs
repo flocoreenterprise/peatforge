@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import vm from 'node:vm';
+const context = { exports: {} };
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('./canals.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, context);
+const { canalOverlay, hotspotSourceLabel } = context.exports;
+const line = (waterway, coordinates = [[114, -3], [114.01, -3.01]]) => ({ type: 'Feature', properties: { waterway }, geometry: { type: 'LineString', coordinates } });
+const data = { type: 'FeatureCollection', available: true, features: [line('canal'), line('ditch'), line('drain'), line('river'), line('canal', [[Infinity, 0], [1, 1]]), line('canal', [[0, 91], [1, 1]]), line('canal', [[1, 1]]), { ...line('canal'), properties: { tags: { waterway: 'canal' } } }] };
+assert.equal(canalOverlay(data).features.length, 4, 'only valid canal/ditch/drain lines are rendered');
+assert.equal(canalOverlay({ ...data, available: false }).features.length, 0, 'unavailable data removes previously drawn canals');
+assert.equal(canalOverlay(null).features.length, 0);
+assert.equal(hotspotSourceLabel({ source: 'NASA FIRMS archive', items: [] }, 'replay'), 'Arsip titik panas: NASA FIRMS archive · bukan api terkonfirmasi');
+assert.equal(hotspotSourceLabel({ available: false, source: 'NASA FIRMS archive', items: [] }, 'replay'), 'Arsip titik panas: belum tersedia');
+assert.match(hotspotSourceLabel({ items: [{ source: 'fixture' }] }, 'live'), /fixture/);
+assert.match(hotspotSourceLabel({ items: [] }, 'live'), /sumber belum tersedia/);
+assert.deepEqual(data.features[0].geometry.coordinates, [[114, -3], [114.01, -3.01]], 'overlay does not mutate source geometry or infer parameters');
+console.log('PASS: OSM waterway/coordinate filtering, unavailable removal, archive/fixture source labels and immutable geometry');

@@ -98,3 +98,11 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - Live phone UAT: diagnosticCAc32aed31159fcb4222c702744a098a2d andWardenCAf2722b48d1d76f69fe7f79c5980e99eb completed/no providererror; userconfirmedhumananswered. Warden150cm/no smoke reachedreadback but no subsequentYA, so reportunconfirmed. BrowserRealtime200 gpt-realtime-2.1/marin; micquality stillmanual.
 - FIRMS key-clear P1: explicitblankset-secrets config nowoverridesstaleinheritedenv; mockregressionsPASS, engine80PASS, root193tests+41subtests PASS; no actualsecretreadin tests.
 - OSM adapter: cached5kmcanal/ditch/drain GeoJSON +ODbL +explicit400mteamassumption/no measuredspacing; realprovidersunavailable soactualgeometryremainsroadmap, no fabricatedlines. Own3OSMtests/engine80/root193+41PASS; Luna scopeddataauditclear exceptFIRMSkeyclearP1fixedseparately.
+
+13:00 WIB
+Done: core/B6 committed; live Realtime mint200; two attended TwiML calls completed; FIRMS2019 complete cached2uniqueUTC detections; tunnel closed.
+In progress: layout local1440/1024/390QA and dispatcher persona foundations; root193tests+41subtests PASS.
+Blocked: OSM providers unavailable; no real geometry/spacing claimed; mobile layoutP1 needsmoredecisionroom.
+Next: finishlayout→P0-Adispatcher→P0-Bpublicreport/QRwithhardcostguards→P0-Csource/status.
+Cut: P1anywhere/volunteers andextendedReplay/cachefallback onlyafterP0green; freeze15:45,submission16:30.
+- Layout C+A: independent decision/map/context columns, combined WT/PFVI summary and critical jump, mobile341px scroll sheet/all5markers; build PASS, focused summary/canals/marker/replay19/scenario/inbox tests PASS; root193+41 PASS. Terra final local1440/1024/390 noP0/P1; Luna CTA P1 fixed/rechecked. Remaining P2 nits deferred; no more visual rechecks. New freeze14:00; P1anywhere/ReplaySeptember/offline/OSMretries/status cut.
