@@ -1,0 +1,21 @@
+Boundary DATA attribution and provenance
+
+File: indonesia-adm1-2017.geojson (unaltered downloaded simplified GeoJSON)
+Provider: geoBoundaries gbOpen, boundary ID IDN-ADM1-65028918.
+Source: OpenStreetMap contributors / Wambacher.
+Represented year: 2017. Coverage: 34 historical provinces, NOT current provinces.
+Papua's newer administrative splits are not separately represented.
+License: Open Data Commons Open Database License 1.0 (ODbL1.0).
+License text: https://opendatacommons.org/licenses/odbl/1-0/
+OSM attribution/license: https://www.openstreetmap.org/copyright
+Provider metadata: https://www.geoboundaries.org/api/current/gbOpen/IDN/ADM1/
+Pinned data download: https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/IDN/ADM1/geoBoundaries-IDN-ADM1_simplified.geojson
+Downloaded: 2026-11-07. Only geographic data was downloaded, not implementation code.
+The neighboring metadata JSON is the unaltered public provider response.
+
+Province boundaries: geoBoundaries gbOpen, OpenStreetMap contributors and
+Wambacher, ODbL1.0. Preserve attribution in UI and redistributed datasets.
+Simplified boundaries can omit tiny islands/coastal details. Unmatched regional
+detections remain outside/unknown, not silently assigned by bounding boxes.
+Point-in-polygon includes holes/MultiPolygons; border ties use alphabetical
+province order and are counted once. Counts describe heat detections, not fires.

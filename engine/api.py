@@ -23,6 +23,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from .cache import DataUnavailable
+from .national import NationalService
 from .service import EngineService, REPLAY_DAYS, START, _service, replay_meta
 from .villages import list_villages
 
@@ -79,8 +80,20 @@ def _response(value):
 def create_router(service: EngineService | None = None) -> APIRouter:
     router = APIRouter(route_class=SafeEngineRoute,tags=['engine'])
     warmup_lock = threading.Lock()
+    national_lock = threading.Lock()
+    national_service = None
     def engine():
         return service if service is not None else _service()
+
+    @router.get('/national/hotspots')
+    def national_hotspots(days: int=Query(1,ge=1,le=7)):
+        nonlocal national_service
+        with national_lock:
+            if national_service is None:
+                backend=engine()
+                national_service=NationalService(backend.ingest,clock=backend.clock)
+        result=national_service.hotspots(days)
+        return _response(dict(result,items=[],points_omitted=True))
 
     @router.get('/villages')
     def villages():

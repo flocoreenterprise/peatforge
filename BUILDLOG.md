@@ -82,3 +82,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - A6: bounded per-village initial-WT assimilation, before/after/history and idempotent persistence; engine60 PASS; root ready-block115+15subtests PASS; replay remains unchanged.
 - B4: persisted risk crossings, SMS-first autonomy, quiet21-05 exceptEKSTREM, hard1call/day +30s cooldown, real trace events and A6 bridge; agents55 PASS; root115+15subtests PASS.
 - C5: proposal-linked actual agent event timeline and scoped transcript, polling4s; isolatedstrictTS and rootwebbuild PASS; shared App wiring included in upcoming integration commit.
+- C7 light: exact province polygon counts on pinned2017/34-unit data, cached5min; engine67tests PASS inclroutebounds/pointomission; strictTS+webbuild PASS; realcache classification5.26s, no nationalrisk claims.

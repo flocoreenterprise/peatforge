@@ -23,6 +23,20 @@ class APITests(unittest.TestCase):
     def setUp(self):
         self.client=TestClient(app_for())
 
+    def test_light_national_counts_keep_metadata_and_omit_points(self):
+        snapshot={'items':[{'id':'synthetic-point'}],'by_province':{'Test province':3},
+                  'total_matched':3,'coverage':{'units':34,'boundary_year':2017},'stale':True}
+        with patch('engine.api.NationalService.hotspots',return_value=snapshot) as call:
+            response=self.client.get('/api/national/hotspots?days=7')
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json()['by_province'],snapshot['by_province'])
+            self.assertEqual(response.json()['items'],[])
+            self.assertTrue(response.json()['points_omitted'])
+            self.assertTrue(response.json()['stale'])
+            call.assert_called_once_with(7)
+            for day in (0,8):
+                self.assertEqual(self.client.get(f'/api/national/hotspots?days={day}').status_code,422)
+
     def test_read_shapes_and_replay_aliases(self):
         response=self.client.get('/api/villages')
         self.assertEqual(response.status_code,200)
