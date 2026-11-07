@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .cache import DataUnavailable, DiskCache
 from .archive import FirmsArchive
+from .osm import OSMCanals, unavailable_osm
 from .groundwater import load_params, solve_groundwater
 from .ingest import Ingest
 from .pfvi import ASSUMPTIONS, diobs, level, load_pfvi_config, run_pfvi
@@ -87,6 +88,7 @@ class EngineService:
         self.ingest = ingest or Ingest(DiskCache(Path(__file__).resolve().parent.parent / 'runtime/engine/http'), mode='live')
         self.clock = clock
         self.archive = FirmsArchive(self.ingest.cache) if self.ingest.mode=='live' else None
+        self.osm = OSMCanals(self.ingest.cache) if self.ingest.mode=='live' else None
         self.initial_configuration_at = datetime.fromtimestamp(self.clock(), UTC).isoformat().replace('+00:00','Z')
         self.hydraulic = load_params()
         self.pfvi_config = load_pfvi_config()
@@ -301,6 +303,9 @@ class EngineService:
                  and any(_distance_km(v['lat'],v['lon'],h['lat'],h['lon']) <= radius_km for v in scope)]
         items = list({h['id']:h for h in items}.values())
         return dict(data, items=items)
+
+    def osm_canals(self) -> dict:
+        return self.osm.feature_collection() if self.osm is not None else unavailable_osm()
 
     def archive_summary(self) -> dict:
         if self.archive is None:

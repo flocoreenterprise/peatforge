@@ -263,3 +263,23 @@ do not access real credentials/providers and remain explicitly unavailable.
 Verified all13 chunks succeeded: uniqueunion2, Talio1, TalioMuara1, otherpilots0;
 detections August9 05:27UTC and August15 17:57UTC. These are actual heat
 detections, not validation of groundwater/PFVI predictions.
+
+Post-UAT OSM adapter / roadmap gate:
+
+GET `/api/canals/osm` provides current mapped canal/ditch/drain LineString
+GeoJSON from Overpass around the five5km pilot circles. Source and ODbL
+attribution accompany any real cached geometry. Whole mapped ways may extend
+outside query circles. It is explicitly current geometry, not2019 replay data.
+No median hydraulic spacing is inferred from these lines; `spacing.available`
+is false, `median_spacing_m` is null, and the400m model spacing remains a labelled
+team assumption. Geometry never automatically changes groundwater parameters.
+
+Public Overpass primary and documented alternate were unavailable during the
+bounded post-UAT checks, so OSM geometry remains ROADMAP at this gate. The adapter
+returns `available:false`, emptyfeatures and an explicit unavailable reason;
+this is not a claim that no canals exist. No geometry or spacing was fabricated.
+Successes use24h diskcache with labelled stale fallback. Failed requests are
+negative-cached for5min to avoid hammering providers during4s UI polling; each
+of two documented endpoints has a <=10s timeout and no automatic retry.
+Offline tests cover geometry parsing/deduplication, malformed/incomplete
+responses, stale cache, truthful spacing and unavailable fixture/API behavior.

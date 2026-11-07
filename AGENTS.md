@@ -112,3 +112,15 @@ Hard rules:
 - User authorized generation of missing server secrets, including PIN, solely through set-secrets.ps1; never print them. Existing nonempty secrets are preserved.
 - Tunnel stays open until user says UAT done. No automated background dispatch during attended UAT; SMS is mock without gateway settings.
 - After live UAT only: FIRMS2019 archive if configured and OSM canal geometry, each must pass by12:50 or roadmap. No blocked-site scraping/accounts. Measured SIPALAGA WT is the first pilot calibration roadmap step. Freeze13:00.
+
+## Organizer deadline update — latest override
+- Submission16:30WIB; featurefreeze15:45 supersedes all13:00freeze instructions above.
+- Order after current persona/layout block: extendReplay2019June15..September30 with cachedERA5/FIRMS5km, deterministic per-village model-warning/hotspot/lead-time and DaysBought, no tuning; then browserRealtime attendedUAT, Terra1440/1024/390P0/P1only. No furtherTwiMLcallunlessuserasks.
+- At15:30 fullsuite andcleancommit; tunnelclosedunlessuserasks. Recordfive-line statusinBUILDLOG every30min. After15:45 backupvideo/pitch.
+- LayoutuserC+A decisionconsole: alwaysvisibledecisionqueue, separate map/contextcolumns, data-firstsummary, plainBahasa, sourcescollapsed; no APIchangesforthatblock.
+
+## Live command center priority — latest override
+- Current layout first; then P0-A calm emergency-dispatcher Warden (no religious greeting, clear AI identity/no unsupportedBPBDaffiliation, consent,3observationalquestions, LOWqualitativeevidence, strictreadback/bye, fireURGENT safetyline).
+- P0-B public/lapor +QR, anonymousoptional, samepipeline, reporterfollowup, hardserver180svoicecap plusglobal/daily/perIPlimits; reviewsecurityBEFOREtunnel.
+- P0-C per-panel source/freshness and/status, FIRMS15minrefresh. OnlyafterP0green: P1-D arbitrarylocation/BMKGsearch withuncalibratedlabels andconsentedvolunteers/trialverifiedphones; P1-E extendedReplaySep30/leadtime andofflinecachefallback iftime.
+- Solperfolder, Lunaaftereachblockmax5min, Terra1440/1024/390;15:30fullsuitecleancommit,15:45freeze,16:30submission. TunnelclosedunlessrequestedforattendedpublicUAT; no furtherTwiMLcallunlessasked.
