@@ -48,6 +48,7 @@ class Inbound(Model):
     processing_id: str | None = None
     confirmation_report: dict[str, Any] | None = None
     context_captured: bool = False
+    trace_id: str | None = None
 
 
 def verify_webhook(settings: ChannelSettings, key: str | None, raw: bytes,

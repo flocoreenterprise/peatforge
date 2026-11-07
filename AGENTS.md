@@ -78,3 +78,11 @@ Hard rules:
 - Auditor after each block, max 5 minutes. Security review once before opening the integrated tunnel.
 - Reference visuals only from screenshots supplied by user. Do not browse the old example application or open rehearsal source.
 - Every 30 minutes report five lines: done / in progress / blocked / next / cut.
+
+## Speed mode — latest user override until 12:00
+- Three Sol low builders own disjoint web/src/map, web/src/inbox, web/src/village files; root owns App.tsx/api.ts/shared wiring.
+- B5 + C2 by11:00; C3 + C4 by11:30; integrated SMS UI by12:00. Engine finished; no new engine work.
+- Runtime allows three active subagents plus root; root finishes B5 while three web builders run.
+- Builders check only owned modules; root full suite/build at merge. No docs-only commits; BUILDLOG one line/task.
+- Luna audits11:30 and12:15, max5min each; Terra screenshots once12:15; security once before tunnel opens.
+- Report blockers only until12:00. Existing cuts, secret boundaries and13:00 freeze remain.

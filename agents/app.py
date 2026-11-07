@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import Field
 from engine.api import create_router
 from engine.cache import DataUnavailable
@@ -18,6 +18,7 @@ from .db import Database, identifier
 from .models import Level, Mode, Model
 from .tools import ToolService, seed_mock
 from .warden import Warden, message_items
+from .planner import Planner
 
 RUNTIME_DIR = Path(__file__).resolve().parent.parent / 'runtime' / 'agents'
 
@@ -53,8 +54,8 @@ def require_operator(request: Request) -> None:
 class DemoInbound(Model):
     responder_id: str = Field(min_length=1, max_length=80)
     text: str = Field(min_length=1, max_length=500)
-    mode: Mode = 'live'
-    day: int = Field(default=0, ge=0, le=61)
+    mode: Mode | None = None
+    day: int | None = Field(default=None, ge=0, le=61)
 
 
 class DemoAlert(Model):
@@ -65,9 +66,18 @@ class DemoAlert(Model):
     hour_override: int | None = Field(default=None, ge=0, le=23)
 
 
+class ActionNote(Model):
+    reason: str = Field(default='', max_length=500)
+    note: str = Field(default='', max_length=500)
+
+
+class EmptyInput(Model):
+    pass
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
-               data_source: str | None = None) -> FastAPI:
+               data_source: str | None = None, web_dist: Path | None = None) -> FastAPI:
     public_demo = public_demo_setting(os.environ.get('PUBLIC_DEMO')) if public_demo is None else public_demo
     source = data_source or os.environ.get('PEATFORGE_DATA_SOURCE', '').strip() or 'live'
     if source not in ('live', 'fixture'):
@@ -104,6 +114,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.warden = Warden(database, app.state.tools, app.state.channels)
         app.state.channels.on_inbound = app.state.warden.handle
         app.state.channels.prepare_inbound = app.state.warden.prepare
+        app.state.planner = Planner(database, app.state.tools, app.state.channels)
+        app.state.warden.after_confirm = app.state.planner.process
         app.state.brain = OfflineBrain()
         yield
 
@@ -132,7 +144,8 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
 
     @app.exception_handler(HTTPException)
     async def auth_handler(request, exception):
-        return JSONResponse({'error': {'code': 'unauthorized' if exception.status_code == 401 else 'forbidden', 'message': 'Akses ditolak'}}, status_code=exception.status_code)
+        code = {401: 'unauthorized', 403: 'forbidden', 409: 'conflict', 404: 'not_found'}.get(exception.status_code, 'invalid')
+        return JSONResponse({'error': {'code': code, 'message': 'Akses ditolak' if exception.status_code in (401,403) else 'Status tidak mengizinkan perubahan'}}, status_code=exception.status_code)
 
     app.include_router(create_router(service=engine), prefix='/api', dependencies=[Depends(require_operator)])
     operator = APIRouter(prefix='/api', dependencies=[Depends(require_operator)])
@@ -158,7 +171,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     def demo_inbound(body: DemoInbound):
         if not public_demo:
             raise HTTPException(403, 'Demo only')
-        if body.mode == 'live' and body.day != 0:
+        if body.mode == 'live' and body.day not in (None, 0):
             raise ValueError('Invalid live day')
         return app.state.channels.inbound(Inbound(responder_id=body.responder_id, channel='web', text=body.text, mode=body.mode, day=body.day))
 
@@ -179,6 +192,32 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         return {'trace_id': trace_id, 'notified': len(rows), 'suppressed': 0, 'mock': True,
                 'level': status.level, 'source': status.source, 'mode': body.mode, 'day': body.day,
                 'assumptions': ['Pemicu demo manual; override tidak mengubah fakta model']}
+
+    @operator.get('/actions')
+    def actions(village_id: str | None = None, include_old: bool = False):
+        return app.state.planner.list(village_id, include_old)
+
+    @operator.post('/actions/{action_id}/approve')
+    def approve(action_id: str, body: EmptyInput):
+        return app.state.planner.transition(action_id, 'approve')
+
+    @operator.post('/actions/{action_id}/reject')
+    def reject(action_id: str, body: ActionNote):
+        return app.state.planner.transition(action_id, 'reject', body.reason)
+
+    @operator.post('/actions/{action_id}/complete')
+    def complete(action_id: str, body: ActionNote):
+        return app.state.planner.transition(action_id, 'complete', body.note)
+
+    @operator.get('/demo/progress')
+    def progress(responder_id: str):
+        return app.state.planner.progress(responder_id)
+
+    @operator.get('/observations')
+    def observations(village_id: str | None = None):
+        with app.state.database.connect() as connection:
+            rows = connection.execute('SELECT id,data,pre_update_model,created_at FROM observations WHERE (? IS NULL OR village_id=?) ORDER BY created_at DESC LIMIT 200', (village_id,village_id)).fetchall()
+        return {'items': [{'id': row['id'], **json.loads(row['data']), 'pre_update_model': json.loads(row['pre_update_model']), 'created_at': row['created_at']} for row in rows]}
 
     app.include_router(operator)
 
@@ -206,6 +245,31 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             return channels.sms_inbound(event)
         except (ValueError, TypeError, RecursionError):
             return JSONResponse({'error': {'code': 'invalid', 'message': 'Invalid gateway event'}}, status_code=422)
+
+    dist = (web_dist if web_dist is not None else Path(__file__).resolve().parent.parent / 'web' / 'dist').resolve()
+    mime = {'.js': 'application/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.ico': 'image/x-icon',
+            '.woff': 'font/woff', '.woff2': 'font/woff2', '.webp': 'image/webp', '.html': 'text/html'}
+
+    @app.get('/{requested_path:path}')
+    def frontend(requested_path: str):
+        def missing():
+            return JSONResponse({'error': {'code': 'not_found', 'message': 'Tidak ditemukan'}}, status_code=404)
+        if requested_path == 'api' or requested_path.startswith('api/') or '\\' in requested_path:
+            return missing()
+        if any(part.startswith('.') for part in Path(requested_path).parts):
+            return missing()
+        candidate = (dist / requested_path).resolve()
+        if not candidate.is_relative_to(dist):
+            return missing()
+        if candidate.is_file():
+            if candidate.suffix.lower() not in mime:
+                return missing()
+            return FileResponse(candidate, media_type=mime[candidate.suffix.lower()])
+        if candidate.suffix or requested_path.startswith('assets/'):
+            return missing()
+        index = (dist / 'index.html').resolve()
+        return FileResponse(index, media_type='text/html') if index.is_relative_to(dist) and index.is_file() else missing()
 
     return app
 

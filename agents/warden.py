@@ -109,31 +109,40 @@ class Warden:
                 'mode': message.mode if message.mode is not None else state.get('mode', 'live'),
                 'day': message.day if message.day is not None else state.get('day', 0),
                 'context_captured': True,
+                'trace_id': state.get('trace_id'),
                 'confirmation_report': state.get('pending') if state.get('state') == 'confirm' else None})
 
     def _confirm(self, message: Inbound, state: dict, key: str) -> dict:
         checkpoint_key = 'warden-confirm:' + (message.processing_id or key)
         checkpoint = self.db.get(checkpoint_key)
+        # Browser retries have a new inbound ID. Resume an unfinished confirmation
+        # hook from saved state rather than leaving its observation without actions.
+        if not checkpoint and not message.confirmation_report and state.get('confirmation_receipt'):
+            prior = self.db.get(state['confirmation_receipt'])
+            if prior and prior.get('saved') and not prior.get('hook_done'):
+                checkpoint_key, checkpoint = state['confirmation_receipt'], prior
         if not checkpoint:
             pending = message.confirmation_report if message.context_captured else state.get('pending')
             if not pending:
                 return self._reply(message, state, 'Belum ada laporan yang menunggu konfirmasi. Kirim AIR dalam cm dan ASAP YA atau TIDAK.')
-            checkpoint = {'observation': pending}
+            checkpoint = {'observation': pending, 'trace_id': message.trace_id}
             self.db.set(checkpoint_key, checkpoint)
         observation = ObservationInput(**checkpoint['observation'], confirmed=True)
         saved = checkpoint.get('saved')
         if saved is None:
             saved = self.tools.log_field_observation(observation, observation_id='o_' + (message.processing_id or key))
+            saved['trace_id'] = checkpoint.get('trace_id')
             checkpoint['saved'] = saved
             self.db.set(checkpoint_key, checkpoint)
         if state.get('pending') == checkpoint['observation']:
             state.pop('pending', None)
-            state.update(state='saved', observation_id=saved['observation_id'])
+            state.update(state='saved', observation_id=saved['observation_id'], confirmation_receipt=checkpoint_key)
             self.db.set(key, state)
         # A failed B5 hook resumes with the same observation; the hook must use
         # observation_id idempotently. Never create another observation on retry.
-        if self.after_confirm and not checkpoint.get('hook_done'):
-            self.after_confirm(observation.model_dump(), saved)
+        if not checkpoint.get('hook_done'):
+            if self.after_confirm:
+                self.after_confirm(observation.model_dump(), saved)
             checkpoint['hook_done'] = True
             self.db.set(checkpoint_key, checkpoint)
         return self._reply(message, state, 'Terima kasih. Laporan terkonfirmasi telah dicatat untuk ditinjau petugas.', observation_id=saved['observation_id'])
@@ -182,10 +191,14 @@ class Warden:
             day = message.day if message.day is not None else state.get('day', 0)
             if mode == 'live' and day != 0:
                 raise ValueError('Live mode requires day zero')
+            if (mode, day) != (state.get('mode','live'), state.get('day',0)):
+                state.pop('trace_id', None)
             landmark = self.tools.resolve_landmark(responder['village_id'], text)
             pending = dict(village_id=responder['village_id'], responder_id=message.responder_id,
                            mode=mode, day=day, landmark_id=landmark.landmark_id, note=message.text, **facts)
             observation = ObservationInput(**pending)
+            state.pop('observation_id', None)
+            state.pop('confirmation_receipt', None)
             state.update(state='confirm', pending=observation.model_dump(exclude={'confirmed'}), mode=mode, day=day)
             self.db.set(key, state)
             parts = []

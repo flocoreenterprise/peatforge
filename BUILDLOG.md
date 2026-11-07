@@ -73,3 +73,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - Luna found inbound receipt retry could skip failed processing. Fixed durable completion and original context;
   failed confirmation hooks resume same observation without duplicates. Transient failure is503, not invalid422.
 - B5 underway: persisted proposal/approval/follow-up loop, mock delivery only, no adaptive recalibration.
+- B5: Planner/Verifier + idempotent approval/follow-up + contextual SMS progress; 44 backend unittest tests PASS, audit context issues fixed; mock delivery only.

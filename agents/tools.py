@@ -15,7 +15,7 @@ class Engine(Protocol):
     def simulate(self, village_id: str, request: dict[str, Any]) -> dict[str, Any]: ...
     def get_canals(self, village_id: str) -> list[dict[str, Any]]: ...
     def get_resources(self, village_id: str) -> dict[str, Any]: ...
-    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5) -> dict[str, Any]: ...
+    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5, mode: str = 'live', day: int = 0) -> dict[str, Any]: ...
 
 
 def engine_backend(mock: bool = True) -> Engine:
@@ -58,10 +58,11 @@ class ToolService:
     def get_resources(self, village_id: str) -> dict[str, Any]:
         return self.engine.get_resources(village_id)
 
-    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5) -> dict[str, Any]:
+    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5, mode: Mode = 'live', day: int = 0) -> dict[str, Any]:
+        _context(mode, day)
         if not 1 <= hours <= 168 or not 0 < radius_km <= 100:
             raise ValueError('Invalid hotspot window')
-        return self.engine.get_hotspots(village_id, hours=hours, radius_km=radius_km)
+        return self.engine.get_hotspots(village_id, hours=hours, radius_km=radius_km, mode=mode, day=day)
 
     def resolve_landmark(self, village_id: str, text: str) -> Landmark:
         normalized = ' '.join(re.findall(r'\w+', text.lower()))

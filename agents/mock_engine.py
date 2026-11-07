@@ -45,6 +45,6 @@ class MockEngine:
         self._check(village_id)
         return dict(pumps=1, crews=1, canal_blocks=[dict(id='K4', status='open')], source='fixture')
 
-    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5) -> dict[str, Any]:
+    def get_hotspots(self, village_id: str, hours: int = 48, radius_km: float = 5, mode: str = 'live', day: int = 0) -> dict[str, Any]:
         self._check(village_id)
         return dict(items=[], available=False, stale=False, data_as_of=None, reason='mock_no_hotspot_data', source='fixture')

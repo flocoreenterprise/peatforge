@@ -117,3 +117,39 @@ as an anonymous report. No unsupported anonymity promise is made. B5 will attach
 Planner/Verifier to Warden.after_confirm and complete the proposal approval loop.
 
 Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels agents.test_warden -v`.
+
+## B5 complete mock loop
+
+Warden.after_confirm invokes an observation-ID-idempotent Planner. The Verifier
+retains the pre-update discrepancy; over 30cm produces a visible `kind=verify`
+dispatch-check item. Hotspot checks use 2km/48h with the same mode/day; unavailable
+replay detections produce a flag, never a check against live detections.
+Planner simulates selected canal blocking and pump standby with deterministic tools,
+using a clearly labelled 60cm scenario raise. It retains positive hydraulic benefit
+even when Days Bought is null or zero, drops zero benefit, and inserts at most two
+ranked proposals. No adaptive update or accuracy claim is performed.
+
+Action insertion and the pipeline completion receipt share one transaction. Proposed
+items expire after six hours; newer same-village/type proposals supersede proposed
+predecessors. Approval changes status to approved and atomically stores exactly one
+mock follow-up for the original responder. It never marks field execution. Exact,
+no-days and lower-bound variants preserve tool facts. Rejection and optional manual
+completion are persisted. Protected approval delivery is unavailable until auth and
+an approved real delivery flow exist.
+
+Routes: GET `/api/actions?village_id=&include_old=false` -> items/hidden_count;
+POST `/api/actions/{id}/approve` with `{}`; reject with `{reason}`; complete with
+`{note}`. GET `/api/observations` returns items with id, confirmed input, pre-update
+model and created_at. GET `/api/demo/progress?responder_id=r1` returns responder_id,
+state, persisted mode/day, observation_id, action_id, counts (messages/observations/
+actions) and steps (`{id,label,done}` for alert/report/proposal/approved/followup).
+Progress reads persisted facts instead of parsing message text.
+
+The app serves only web/dist assets and an HTML SPA fallback; `/api` never falls
+back to HTML. Paths outside dist, dotfiles, source files, and missing assets are 404.
+JavaScript/CSS MIME types are explicit. No tunnel is opened by this code.
+
+Validation: `.venv/Scripts/python.exe -m unittest agents.test_foundation agents.test_channels agents.test_warden agents.test_planner -v`.
+The cache integration check disables network, uses existing actual provider data and
+temporary agent state, and verifies the current Talio replay day9 scenario returns
+one modelled day of delay. It skips explicitly if the provider cache is absent.
