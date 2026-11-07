@@ -107,6 +107,39 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.engine.simulate(V, dict(request, days=15))
 
+    def test_simulation_input_version_stable_and_covers_future_forcing_and_configuration(self):
+        baseline = self.engine.village_status(V)
+        version = baseline['simulation_input_version']
+        self.assertEqual(len(version), 64)
+        self.assertEqual(self.engine.village_status(V)['simulation_input_version'], version)
+        # A new fetch/configuration timestamp alone does not invalidate numbers.
+        fresh = EngineService(Ingest(), clock=lambda: self.engine.clock() + 301)
+        self.assertEqual(fresh.village_status(V)['simulation_input_version'], version)
+        class FutureChanged(Ingest):
+            def weather(self, *args, **kwargs):
+                data = copy.deepcopy(super().weather(*args, **kwargs))
+                data['items'][-1]['rain_mm'] += 1
+                return data
+        changed = EngineService(FutureChanged()).village_status(V)
+        self.assertEqual(changed['wt_cm'], baseline['wt_cm'])
+        self.assertEqual(changed['pfvi'], baseline['pfvi'])
+        self.assertNotEqual(changed['simulation_input_version'], version)
+        hydraulic = EngineService(Ingest())
+        hydraulic.hydraulic = replace(hydraulic.hydraulic, specific_yield=.25)
+        self.assertNotEqual(hydraulic.village_status(V)['simulation_input_version'], version)
+        pfvi = EngineService(Ingest())
+        pfvi.pfvi_config['annual_rain_mm'] += 1
+        self.assertNotEqual(pfvi.village_status(V)['simulation_input_version'], version)
+        state = EngineService(Ingest())
+        state._state['villages'][V]['version'] = 2
+        self.assertNotEqual(state.village_status(V)['simulation_input_version'], version)
+        initial = EngineService(Ingest())
+        initial._state['villages'][V]['initial_wt_cm'] += 1
+        self.assertNotEqual(initial.village_status(V)['simulation_input_version'], version)
+        # Replay ignores live adaptive state and has its own stable inputs.
+        self.assertEqual(state.village_status(V, 'replay')['simulation_input_version'],
+                         self.engine.village_status(V, 'replay')['simulation_input_version'])
+
     def test_replay_calendar_and_metadata_point_map(self):
         self.assertEqual(replay_meta()['days'],62)
         first,last=self.engine.replay(0),self.engine.replay(61)

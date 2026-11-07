@@ -17,6 +17,7 @@ class Status(Model):
     pfvi_level: Level | None = None
     critical_now: bool = False
     critical_reason: Literal['wt', 'pfvi', 'both'] | None = None
+    simulation_input_version: str | None = None
     pfvi: float | None = Field(ge=0, le=300)
     wt_cm: float | None
     days_to_critical: int | None = Field(ge=0)

@@ -6,6 +6,7 @@ Public environmental providers are independent of communications/auth settings.
 from __future__ import annotations
 
 import copy
+import hashlib
 import math
 import json
 import os
@@ -186,6 +187,18 @@ class EngineService:
             assumptions.append('Bounded initial-condition assimilation after one confirmed observation; K/Sy not calibrated; confidence0.7 is heuristic, not validated probability')
         result = dict(weather=weather, groundwater=gw, curve=curve, assumptions=assumptions,
                       confidence=.7 if accepted else .5)
+        # A browser may reuse simulations only while every numerical run input
+        # agrees. Provider timestamps and request time are not numerical inputs.
+        simulation_inputs = {
+            'schema': 'peatforge-simulation-input-v1', 'village_id': village_id, 'mode': mode,
+            'weather': rows, 'groundwater_params': self.hydraulic.__dict__,
+            'pfvi_config': dict(config, params=config['params'].__dict__),
+            'initial_wt_cm': state['initial_wt_cm'] if mode == 'live' else 40,
+            'state_version': version, 'canal_wt_cm': 80,
+        }
+        result['simulation_input_version'] = hashlib.sha256(json.dumps(
+            simulation_inputs, sort_keys=True, separators=(',', ':'), allow_nan=False
+        ).encode('utf-8')).hexdigest()
         self._runs[key] = (self.clock(), result)
         return result
 
@@ -197,6 +210,7 @@ class EngineService:
         weather = run['weather']
         return dict(village_id=village_id, level=point['level'], pfvi=point['pfvi'], wt_cm=point['wt_cm'],
                     pfvi_level=point['level'], critical_now=current_reason is not None, critical_reason=current_reason,
+                    simulation_input_version=run['simulation_input_version'],
                     days_to_critical=crossing, critical_date=curve[crossing]['date'] if crossing is not None else None,
                     confidence=run['confidence'], data_as_of=weather['data_as_of'], wt_source='modelled',
                     source='fixture' if weather['source']=='fixture' else 'modelled', stale=weather['stale'],

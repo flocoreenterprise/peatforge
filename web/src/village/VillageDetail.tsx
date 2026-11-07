@@ -3,12 +3,15 @@ import { api } from '../api';
 import './village.css';
 import { criticalPresentation, type CriticalStatus } from './critical';
 import { scenarioGainText, hydraulicAssumptionText, type ModelSetup } from './scenario';
+import { createSimulationCache, simulationKey } from './simulationCache';
 
 type Point = { date: string; wt_cm: number; pfvi: number };
-type Status = CriticalStatus & { confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[] };
+type Status = CriticalStatus & { confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[]; simulation_input_version?: string };
 type Simulation = { days_bought: number | null; at_least_days: number | null; reason: string | null; wt_gain_cm: number; pfvi_reduction: number; baseline_critical_date: string | null; scenario_critical_date: string | null; curve_baseline: Point[]; curve_scenario: Point[]; assumptions: string[]; model_setup?: ModelSetup };
 type History = { version: number; created_at: string; observation_id?: string | null; params: { provenance?: string; initial_wt_cm?: number }; old?: Status; new?: Status; observed_wt_cm?: number; applied_initial_wt_delta_cm?: number };
 type Bundle = { status: Status; simulation: Simulation; canals: { id: string; name: string; source: string }[]; resources: { pumps: number; crews: number }; history: History[] };
+const simulations = createSimulationCache<Simulation>();
+const intervention = { type: 'canal_block', targets: ['K4'], delta_hc_cm: 60, days: 14 };
 const number = (n: number | null, maximumFractionDigits = 1) => n === null ? 'belum tersedia' : new Intl.NumberFormat('id-ID', { maximumFractionDigits }).format(n);
 
 export function benefitText(s: Simulation): string {
@@ -56,13 +59,19 @@ export default function VillageDetail({ villageId, mode, day }: { villageId: str
       const base = `/villages/${encodeURIComponent(villageId)}`;
       const query = `mode=${mode}&day=${mode === 'live' ? 0 : day}`;
       try {
-        const [status, simulation, canals, resources, history] = await Promise.all([
+        const [status, canals, resources, history] = await Promise.all([
           api<Status>(`${base}/status?${query}`, { signal: controller.signal }),
-          api<Simulation>(`${base}/simulate`, { method: 'POST', signal: controller.signal, body: JSON.stringify({ type: 'canal_block', targets: ['K4'], delta_hc_cm: 60, days: 14, mode, day: mode === 'live' ? 0 : day }) }),
           api<{ items: Bundle['canals'] }>(`${base}/canals`, { signal: controller.signal }),
           api<Bundle['resources']>(`${base}/resources`, { signal: controller.signal }),
           api<{ items: Bundle['history'] }>(`${base}/params/history`, { signal: controller.signal }),
         ]);
+        if (stopped) return;
+        const key = simulationKey({ villageId, mode, day, intervention,
+          inputVersion: status.simulation_input_version,
+          historyVersion: Math.max(0, ...history.items.map(item => item.version)) });
+        const simulation = await simulations.get(key, () => api<Simulation>(`${base}/simulate`, {
+          method: 'POST', body: JSON.stringify({ ...intervention, mode, day: mode === 'live' ? 0 : day }),
+        }));
         if (!stopped) { setData({ status, simulation, canals: canals.items, resources, history: history.items }); setError(''); }
       } catch (e) { if (!stopped) setError(e instanceof Error ? e.message : 'Data belum tersedia'); }
       finally { busy = false; }
