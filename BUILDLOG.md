@@ -120,3 +120,13 @@ Cut: status page, anywhere/volunteers, September Replay, offline mode, OSM retri
 - 13:56 final gate: full Python suite236 passed +41 subtests; all15 frontend test files and production build PASS. Phone watchdog preserves original180s deadline across fallback; strict rejected-create manual retry and safe provider diagnostics pass security27 targeted tests. CONTRACT endpoint examples updated. Live Realtime config accepted; extra Twilio create failed before Call SID, no new phone transcript. Removing carrier TimeLimit remains pending explicit user acceptance; no retry sent. Web work complete for14:00 frontend handoff.
 
 - 14:28 phone stream repair: plain WebSocket URL plus HMAC custom Parameter, known-origin signature variants, bounded pre-auth start, audible TwiML fallback; explicit one-use count4 attended UAT gate. Full243tests+41subtests PASS; Luna noP0/P1; public tunnel WebSocket upgrade PASS. Earlier call completed3s with silence/no boundstream; newly authorized call in progress, no claim of GPT audio success.
+
+- 14:40 phone diagnosis/preflight: Twilio account API reports Trial; official trial reference blocks Stream. Repaircall CA350f57fa0b443c42cebb86a271e72ec2 completed51s/no providererror, legacyTwiML only, noGPTstream; test utterance, no confirmedreport. Full-account read-only gate beforebudget/call committed f752613;25voice tests and full250+41PASS. First fullrun temporarySQLiteopenfailure passed isolated and fullrerun. No furthercalls; user upgrading manually.
+- A7 fire-event QA: deterministic1km/48h union-find,375m/5UTCday persistence,7citedGVP volcanoes, versionedparams/evidence snapshots and raw/event APIs; minimalcandidatebadges/Kenapa/lowriskcopy, no layoutchanges. Full250tests+41subtests,16webtestfiles,webbuild PASS; Luna noP0/P1. LiveAPI200:7day27759detections,7806events,70industrial/6volcanic/7730uncertain;5413detections excluded heuristically. Localmanualnationalcounts/reasonsPASS; screenshotcapturetimedout, no new proofimage claimed. No peat/vegetationmask or OSMindustrialcache, unknownretained; no inferredrainyseason.
+
+14:41 WIB - feature block frozen before15:00 deadline
+Done: A7 classifier/API/minimalweb labels and contract examples green; phone trial preflight committed and pushed.
+In progress: final A7 commit/push and frontend handoff; no new features.
+Blocked: real phone GPT requires Twilio Full account; no peat/vegetation national mask or industrial OSM cache.
+Next: user completes billing upgrade; verify account and await explicit authorization before any further call.
+Cut: invented land cover, rainy-season claim without evidence, OSM retries, September replay, anywhere/volunteers/offline/status page.

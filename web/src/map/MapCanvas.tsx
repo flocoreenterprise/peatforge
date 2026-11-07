@@ -8,6 +8,7 @@ import type { Hotspots, Risk } from './pilot';
 import { canalOverlay, hotspotSourceLabel } from './canals';
 import type { OsmCanals } from './canals';
 import './canals.css';
+import { eventForDetection, classLabel } from './fireEvents';
 
 // MapLibre 6 ships a standalone module worker. Explicitly emit its URL so the
 // production bundle does not resolve a missing sibling beside the app chunk.
@@ -130,10 +131,24 @@ export default function MapCanvas({ dark, villages, risk, hotspots, osmCanals, m
   useEffect(() => {
     const instance = map.current; if (!instance || !ready) return;
     const referenceTime = Date.parse(hotspots?.data_as_of ?? '') || Date.now();
-    const data: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: (hotspots?.available === false ? [] : hotspots?.items ?? []).map(point => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [point.lon, point.lat] }, properties: { recent: referenceTime - Date.parse(point.detected_at) >= 0 && referenceTime - Date.parse(point.detected_at) < 86400000 } })) };
+    const data: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: (hotspots?.available === false ? [] : hotspots?.items ?? []).map(point => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [point.lon, point.lat] }, properties: { classification_label: classLabel(eventForDetection(hotspots?.fire_events, point.id)?.classification), reasons: eventForDetection(hotspots?.fire_events, point.id)?.reasons.join(' · ') || 'Bukti klasifikasi belum tersedia.', sources: eventForDetection(hotspots?.fire_events, point.id)?.sources.map(source => source.name).join(' · ') || point.source, recent: referenceTime - Date.parse(point.detected_at) >= 0 && referenceTime - Date.parse(point.detected_at) < 86400000 } })) };
     if (instance.getSource('hotspots')) (instance.getSource('hotspots') as maplibregl.GeoJSONSource).setData(data);
     else { instance.addSource('hotspots', { type: 'geojson', data }); instance.addLayer({ id: 'hotspot-points', type: 'circle', source: 'hotspots', paint: { 'circle-radius': 5, 'circle-color': ['case', ['get', 'recent'], '#e58c44', '#c6ad8d'], 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff8e9' } }); }
   }, [hotspots, ready]);
+  useEffect(() => {
+    const instance = map.current; if (!instance || !ready) return;
+    const show = (event: maplibregl.MapLayerMouseEvent) => {
+      const feature = event.features?.[0]; if (!feature || feature.geometry.type !== 'Point') return;
+      const content = document.createElement('div');
+      const badge = document.createElement('strong'); badge.textContent = `${feature.properties?.classification_label || 'Klasifikasi belum pasti'} · belum terkonfirmasi`;
+      const disclosure = document.createElement('details'); const title = document.createElement('summary'); title.textContent = 'Kenapa?';
+      const reason = document.createElement('p'); reason.textContent = `${feature.properties?.reasons || 'Bukti belum tersedia.'} Sumber: ${feature.properties?.sources || 'belum tersedia'}. Cakupan bukti dapat tidak lengkap; deteksi panas bukan konfirmasi api.`;
+      disclosure.append(title, reason); content.append(badge, disclosure);
+      new maplibregl.Popup().setLngLat(feature.geometry.coordinates as [number, number]).setDOMContent(content).addTo(instance);
+    };
+    instance.on('click', 'hotspot-points', show);
+    return () => { instance.off('click', 'hotspot-points', show); };
+  }, [ready]);
   return <>
     <div ref={node} className="map-canvas" aria-label="Peta dasar wilayah Pulang Pisau" />
     <div className="map-shade" />

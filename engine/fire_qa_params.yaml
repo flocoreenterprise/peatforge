@@ -1,0 +1,24 @@
+version: fire-qa-v1
+# All values are team rule assumptions, not calibrated probabilities.
+earth_radius_km: 6371.0
+cluster_distance_km: 1.0
+cluster_hours: 48
+persistence_cell_m: 375
+persistence_days: 5
+context_days: 7
+grid_cosine_floor: 0.000001
+distance_tolerance_km: 0.000000001
+latitude_limit: 90
+longitude_limit: 180
+# Persistence uses all available FIRMS context (at most the existing seven-day feed).
+volcano_radius_km: 5.0
+osm_industrial_radius_km: 0.375
+# No network calls or retries: optional industrial evidence is injected from cache only.
+confidence:
+  uncertain: 0.25
+  persistence_only: 0.4
+  osm_industrial: 0.6
+  volcano: 0.6
+  peat: 0.5
+  vegetation: 0.5
+medium_confidence_min: 0.5

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .cache import DataUnavailable
+from .fire_qa import CLASSES, LIMITATIONS, PARAMS, VOLCANOES, classify_events, headline, stamp
 
 DATA = Path(__file__).with_name('data') / 'indonesia-adm1-2017.geojson'
 COVERAGE = {'units':34,'boundary_year':2017,'boundary_id':'IDN-ADM1-65028918',
@@ -126,6 +127,7 @@ class NationalService:
         self._index=None
         self._snapshot=None
         self._responses={}
+        self._event_responses={}
         self._lock=threading.RLock()
 
     def _refresh(self):
@@ -149,7 +151,7 @@ class NationalService:
                 identity=item['id']
                 if not isinstance(identity,str):
                     raise ValueError('Invalid identity')
-                detections[identity]=(copy.deepcopy(item),stamp,lat,lon)
+                detections[identity]=(dict(copy.deepcopy(item),lat=lat,lon=lon),stamp,lat,lon)
             except (ValueError,TypeError,KeyError,OverflowError):
                 invalid+=1
         classified=[]
@@ -161,6 +163,7 @@ class NationalService:
                         'detections':classified,'invalid_records':invalid,
                         'snapshot_id':'national-'+hashlib.sha256(signature.encode()).hexdigest()[:16]}
         self._responses={}
+        self._event_responses={}
 
     def hotspots(self,days: int=1) -> dict:
         if isinstance(days,bool) or not isinstance(days,int) or not 1<=days<=7:
@@ -189,7 +192,54 @@ class NationalService:
                         assumptions=list(snapshot['source'].get('assumptions',[]))+[
                             'Satellite heat detections are not confirmed fires',
                             'Province counts use 2017 simplified polygons and 34 historical units, not current provincial geography',
-                            'All matched detections counted; no peat/fire-risk/industrial/volcanic classification',
+                            'Raw counts retain all matched detections; event classes are separate heuristic candidates',
                             'Boundary points assigned once by alphabetical province name; small coastal/island errors remain possible'])
+            events=classify_events(matched,context=[row for row,stamp in snapshot['detections']
+                                   if row['province'] is not None and 0<=now-stamp<=PARAMS['context_days']*86400])
+            signature=json.dumps({'rule_version':PARAMS['version'],'parameters':PARAMS,'volcanoes':VOLCANOES,'events':events,
+                                  'data_as_of':result.get('data_as_of')},sort_keys=True,allow_nan=False)
+            event_id=PARAMS['version']+'-'+hashlib.sha256(signature.encode()).hexdigest()[:16]
+            summary=headline(events)
+            class_counts={key:sum(e['classification']==key for e in events) for key in CLASSES}
+            result.update(raw_count=len(matched),event_count=len(events),classification_counts=class_counts,
+                          headline=summary,events_snapshot_id=event_id,rule_version=PARAMS['version'],
+                          by_province_events={name:headline([e for e in events if e['province']==name]) for name in self._index.names},
+                          evidence_coverage={'peat_mask_available':False,'vegetation_available':False,
+                                             'osm_industrial_available':False,'volcano_list_complete':False,'volcano_entries':len(VOLCANOES)})
+            metadata={k:copy.deepcopy(v) for k,v in result.items() if k not in ('items','by_province')}
+            self._event_responses[days]=dict(metadata,items=events,snapshot_id=event_id,
+                                            assumptions=result['assumptions']+LIMITATIONS)
             self._responses[days]=result
             return copy.deepcopy(result)
+
+    def fire_events(self, days: int=7, *, classification: str | None=None,
+                    province: str | None=None, since: str | None=None) -> dict:
+        if classification is not None and classification not in CLASSES:
+            raise ValueError('Unknown classification')
+        after=stamp(since) if since is not None else None
+        with self._lock:
+            self.hotspots(days)
+            result=copy.deepcopy(self._event_responses[days])
+        items=[e for e in result['items'] if (classification is None or e['classification']==classification)
+               and (province is None or e['province']==province)
+               and (after is None or stamp(e['last_seen'])>=after)]
+        result.pop('by_province_events',None)  # Raw endpoint owns its unfiltered per-province QA map.
+        result.update(items=items,headline=headline(items),raw_count=sum(e['detection_count'] for e in items),
+                      event_count=len(items),classification_counts={k:sum(e['classification']==k for e in items) for k in CLASSES},
+                      filters={'class':classification,'province':province,'since':since},
+                      since_semantics='last_seen >= since; full event members retained',
+                      mode='live')
+        return result
+
+    def overview(self, days: int=1) -> dict:
+        result=self.fire_events(days)
+        events=result.pop('items')
+        result['by_province']=[dict(province=name,**headline([e for e in events if e['province']==name]))
+                               for name in self._index.names]
+        result['land_event_definition']='Only positive gambut/vegetasi candidates; uncertain events remain separate, not safe.'
+        h=result['headline']
+        result['headline_sentence']=(f"{h['land_event_count']} kandidat kejadian lahan terklasifikasi; "
+            f"{h['uncertain_event_count']} kejadian belum diketahui. Data gambut belum tersedia. "
+            f"{h['excluded_industry_count']} kandidat industri dan {h['excluded_volcano_count']} kandidat gunung api dipisahkan "
+            '(klasifikasi heuristik, belum terkonfirmasi; daftar gunung api tidak lengkap).')
+        return result

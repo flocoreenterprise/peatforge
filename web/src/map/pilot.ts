@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api, type Village } from '../api';
+import type { FireEvents } from './fireEvents';
 
 export type Mode = 'live' | 'replay';
 export type Level = 'RENDAH' | 'SEDANG' | 'TINGGI' | 'EKSTREM';
 export type Status = { village_id: string; name?: string; level: Level; pfvi_level?: Level; critical_now?: boolean; critical_reason?: 'wt' | 'pfvi' | 'both' | null; pfvi: number | null; wt_cm: number | null; days_to_critical: number | null; critical_date: string | null; source: string; wt_source: string; stale: boolean; data_as_of: string | null; assumptions: string[]; confidence: number; mode: Mode; day: number };
 export type Risk = { type: 'FeatureCollection'; features: { type: 'Feature'; geometry: { type: 'Point'; coordinates: [number, number] }; properties: Status }[] };
-export type Hotspots = { items: { id: string; lat: number; lon: number; detected_at: string; source: string }[]; available?: boolean; stale: boolean; data_as_of: string | null; source?: string; reason?: string };
+export type Hotspots = { fire_events?: FireEvents | null; items: { id: string; lat: number; lon: number; detected_at: string; source: string }[]; available?: boolean; stale: boolean; data_as_of: string | null; source?: string; reason?: string };
 export type ReplayMeta = { start: string; end: string; days: number; perfect_forecast: boolean };
 export const number = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat('id-ID', { maximumFractionDigits: 1 }).format(value);
 export function dateLabel(value: string | null | undefined) { if (!value) return 'Belum tersedia'; const date = new Date(value); return Number.isNaN(date.getTime()) ? 'Belum tersedia' : new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' }).format(date); }
@@ -32,12 +33,13 @@ export function usePilot(enabled: boolean, mode: Mode, day: number) {
         api<Risk>(`/map/risk?${query}`, { signal }),
         api<Hotspots>(`/hotspots?hours=72&radius_km=5&${query}`, { signal }),
         api<ReplayMeta>('/replay/meta', { signal }),
+        mode === 'live' ? api<FireEvents>('/fire-events?days=3', { signal }) : Promise.resolve(null),
       ]);
       inFlight = false; if (!active) return;
-      const [v, r, h, m] = results;
+      const [v, r, h, m, events] = results;
       if (v.status === 'fulfilled') setVillages(v.value.items);
       if (r.status === 'fulfilled') setRisk(r.value); else setRisk(null);
-      if (h.status === 'fulfilled') setHotspots(h.value); else setHotspots({ items: [], available: false, stale: false, data_as_of: null, reason: 'Layanan titik panas belum tersedia.' });
+      if (h.status === 'fulfilled') setHotspots({ ...h.value, fire_events: events.status === 'fulfilled' ? events.value : null }); else setHotspots({ items: [], available: false, stale: false, data_as_of: null, reason: 'Layanan titik panas belum tersedia.' });
       if (m.status === 'fulfilled') setMeta(m.value);
       setError(v.status === 'rejected' || r.status === 'rejected' ? 'Data risiko belum tersedia · mencoba kembali' : '');
       setLoading(false);

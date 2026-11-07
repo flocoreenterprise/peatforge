@@ -132,10 +132,11 @@ Example objects referenced below are defined next. Routes marked optional are cu
 | POST /api/voice/twilio/twiml/gather | S | sid query + SpeechResult form | application/xml readback/Gather/Hangup |
 | POST /api/voice/twilio/status | S | sid query + CallStatus/CallDuration | {"accepted":true} |
 | WS /api/voice/stream | S | signed sid + Twilio media frames | bidirectional audio; optional B6b |
-| GET /api/national/hotspots | O | days=1..7 | {"items":[Hotspot],"by_province":{},"snapshot_id":"s1"} (optional) |
+| GET /api/national/hotspots | O | days=1..7 (default1) | items:[], points_omitted:true, raw by_province plus by_province_events and event totals; implemented |
 | GET /api/national/risk | O | none | GeoJSON coarse risk cells (optional) |
 | GET /api/national/summary | O | none | {"headline":"...","snapshot_id":"s1","by_province":[]} (optional) |
-| GET /api/fire-events | O | relevant=true | {"items":[],"snapshot_id":"s1","unavailable_layers":[]} (optional A7/C8) |
+| GET /api/fire-events | O | days=1..7 (default7), class, province, since | FireEventSnapshot; implemented A7, exact examples below |
+| GET /api/national/overview | O | days=1..7 (default1) | headline_sentence + headline counts + per-province event counts; implemented A7 |
 | POST /api/fire-events/{id}/feedback | O | {"confirmed":false} | {"accepted":true} (optional) |
 
 Browser routes `/`, `/f/{token}`; static assets public, data authorized separately.
@@ -329,7 +330,7 @@ Milestones always return four kinds: wt_60, pfvi_175, pfvi_250, critical. Missin
 
 ## Endpoint availability notes for frontend handoff
 - Currently served browser routes: /, /lapor, /f/{token}. /status was cut. Public ingress allows /lapor only; operator/field screens require local or separately authorized protected access.
-- Optional rows in the original planning table (Telegram, field SSE/field voice aliases, fire-events/national risk) are not a promise of an implemented route. The canonical browser voice API is /api/voice/session, /transcript, /tool, /simulate and /end with X-Field-Token for a scoped field caller or local operator authentication.
+- Optional rows in the original planning table (Telegram, field SSE/field voice aliases, fire-event feedback/national risk) are not a promise of an implemented route. The canonical browser voice API is /api/voice/session, /transcript, /tool, /simulate and /end with X-Field-Token for a scoped field caller or local operator authentication.
 - Browser transcript success: {"accepted":true}; denied assistant speech must never play. Tool success includes server-derived text/stage/state/facts and optional ended/observation_id, depending on the tool. Confirm uses a new standalone caller reply after validated readback. /voice/end returns {"ended":true}. /voice/simulate returns {"session_id":"bv_example","items":[],"state":"collecting","stage":"wt","text":"Air di parit dekat kebun masih ada atau sudah kering?","ended":false,"mode":"live","day":0,"facts":{}}.
 - Live FIRMS cache TTL900seconds; Command polling does not refetch upstream every4seconds. The data timestamp identifies the source/cache snapshot, while screen-sync time only identifies the last successful UI read.
 - Public gateway request bodies are capped at8192bytes before JSON parsing, with10second input deadline (413/408). Public text caps remain500characters and no additional identity fields are accepted.
@@ -337,3 +338,67 @@ Milestones always return four kinds: wt_60, pfvi_175, pfvi_250, critical. Missin
 - A manual rejected-create retry is allowed at most once, only for a recorded definitive creation failure after the UAT reservation with no provider hash/callback/status/stream activity. Unknown/ambiguous requests and already-created calls are never retried. No endpoint exposes this CLI-only path.
 
 - Stream repair UAT is a separate one-use CLI-only exception authorized after the silent completed Realtime attempt. It does not reopen normal autonomy or public dispatch. The accepted server-only180s limit still depends on Twilio REST for carrier termination during legacy fallback.
+
+## A7 classified heat-event candidates — implemented
+
+These are rule-based candidates, **never confirmed fires, factories or eruptions**. Operator routes retain the existing auth policy; the public reporting tunnel does not expose these APIs. No request body is required for these GET endpoints.
+
+- `GET /api/fire-events?days=7&class=gunung_api&province=East%20Java&since=2026-11-01T00:00:00Z`
+- `class` accepts exactly `gambut`, `lahan_vegetasi`, `industri`, `gunung_api`, `tidak_pasti`; omit for all. Province is an exact name from the existing 2017/34-province boundary data. Unknown province returns an empty selection. `since` requires a timezone and selects events with `last_seen >= since`, retaining their full members. `days` selects detections before clustering, while persistence uses available context up to seven days.
+
+Illustrative filtered response (source timestamps/IDs/counts below are fixtures):
+```json
+{
+  "available": true,
+  "mode": "live",
+  "days": 7,
+  "source": "NASA FIRMS",
+  "data_as_of": "2026-11-07T06:00:00Z",
+  "stale": false,
+  "partial": true,
+  "snapshot_id": "fire-qa-v1-example",
+  "rule_version": "fire-qa-v1",
+  "raw_count": 2,
+  "event_count": 1,
+  "classification_counts": {"gambut":0,"lahan_vegetasi":0,"industri":0,"gunung_api":1,"tidak_pasti":0},
+  "filters": {"class":"gunung_api","province":"East Java","since":"2026-11-01T00:00:00Z"},
+  "since_semantics": "last_seen >= since; full event members retained",
+  "evidence_coverage": {"peat_mask_available":false,"vegetation_available":false,"osm_industrial_available":false,"volcano_list_complete":false,"volcano_entries":7},
+  "items": [{
+    "id":"event-example","lat":-8.108,"lon":112.922,"location_method":"first_detection","province":"East Java",
+    "first_seen":"2026-11-06T06:00:00Z","last_seen":"2026-11-07T06:00:00Z",
+    "detection_count":2,"detection_ids":["heat-example-1","heat-example-2"],"max_frp":12.5,"satellites":["N20","N21"],
+    "classification":"gunung_api","confidence":0.6,"confidence_label":"MED","confirmed":false,"persistence_days":2,
+    "reasons":["Deteksi panas satelit belum membuktikan kebakaran.","Dalam 5 km gunung api Holosen Semeru; kandidat sumber panas vulkanik, bukan konfirmasi erupsi.","OSM industri tidak tersedia"],
+    "sources":[{"name":"NASA FIRMS heat detections","url":"https://firms.modaps.eosdis.nasa.gov/"},{"name":"Smithsonian Global Volcanism Program: Semeru","url":"https://volcano.si.edu/volcano.cfm?vn=263300"}]
+  }]
+}
+```
+The response also carries `headline` counts defined below, `coverage`, `assumptions`, and inherited source/cache metadata. Filtered counts describe the returned events; snapshot ID identifies the underlying unfiltered day-window snapshot, and `filters` identifies the selection. IDs hash sorted detection IDs; snapshot hashes include the full rule parameters, volcano list, event contents and source time. A changed window can split/merge an event. Province and map location use the first detection; cross-border events are counted once, not once per province.
+
+`GET /api/national/overview?days=1` has no `items`; it returns the same provenance/evidence metadata, `classification_counts`, `headline_sentence`, `headline`, and `by_province` as an array. Example count object, also used for each province:
+```json
+{
+  "raw_count":8,"event_count":4,"land_event_count":0,
+  "peat_event_count":null,"classified_peat_event_count":0,"vegetation_event_count":0,
+  "excluded_industry_count":1,"excluded_volcano_count":1,"uncertain_event_count":2,
+  "excluded_industry_detection_count":5,"excluded_volcano_detection_count":1,"excluded_detection_count":6
+}
+```
+Example overview additions:
+```json
+{
+  "headline_sentence":"0 kandidat kejadian lahan terklasifikasi; 2 kejadian belum diketahui. Data gambut belum tersedia. 1 kandidat industri dan 1 kandidat gunung api dipisahkan (klasifikasi heuristik, belum terkonfirmasi; daftar gunung api tidak lengkap).",
+  "by_province":[{"province":"East Java","raw_count":1,"event_count":1,"land_event_count":0,"peat_event_count":null,"classified_peat_event_count":0,"vegetation_event_count":0,"excluded_industry_count":0,"excluded_volcano_count":1,"uncertain_event_count":0,"excluded_industry_detection_count":0,"excluded_volcano_detection_count":1,"excluded_detection_count":1}]
+}
+```
+The example province array is shortened; the actual overview includes every mapped province. `land_event_count` counts only positively classified gambut/lahan_vegetasi events. It is **not an estimate of all actual land fires**. `peat_event_count:null` means no peat mask is available; `classified_peat_event_count:0` means no event was positively classified as peat. Never replace that null with zero.
+
+`GET /api/national/hotspots?days=1` preserves the original raw `by_province:{"East Java":1,...}`, `total_matched`, regional/unmatched counts and coverage. It returns `items:[]`, `points_omitted:true`, and adds `raw_count`, `event_count`, `classification_counts`, `headline` (the count object), `by_province_events:{"East Java":{...count object...},...}`, `events_snapshot_id`, `rule_version`, `evidence_coverage`. Use `events_snapshot_id` to match the event snapshot; its older `snapshot_id` remains the raw-source snapshot. The unfiltered per-province map is omitted from filtered `/fire-events` results.
+
+Rules are in `engine/fire_qa_params.yaml`: inclusive pair links1km/48h with transitive union-find, approximate375m persistence cell and at least5 distinct UTC days, volcano proximity5km. Confidence is an uncalibrated heuristic. Seven cited GVP volcanoes are an explicitly incomplete list. Current national service has no peat/vegetation mask and no industrial OSM cache; unknown land cover stays `tidak_pasti`, and every event records `OSM industri tidak tersedia`. No new Overpass request is issued. The classifier supports supplied positive evidence for future adapters but does not fabricate it from pilot village coordinates.
+
+Invalid day/class/time returns422 `{"error":{"code":"invalid","message":"Permintaan tidak valid"}}`. Unavailable FIRMS returns503 `{"error":{"code":"unavailable","message":"Data belum tersedia"}}`, never an invented zero. `partial` and `stale` propagate source coverage/cache state. Live views poll4s; existing source/snapshot caches prevent provider fetches per poll. Low model risk alone does not establish rainy season; the Live summary says `Risiko rendah, pemantauan tetap berjalan.` until seasonal evidence exists.
+
+## Realtime phone capability preflight
+Before reserving call budget or creating a real non-diagnostic Realtime call, the server reads Twilio account type. Trial returns {"call_id":null,"status":"suppressed","reason":"twilio_trial_media_streams_unavailable"}; failed/unknown account lookup returns the same shape with twilio_account_capability_unavailable. Only Full proceeds to the unchanged consent/recipient/autonomy checks. TwiML-only and browser Realtime paths are independent. This lookup never exposes account credentials. Twilio documents Stream as blocked on trial: https://www.twilio.com/docs/usage/trials/try-out-voice#blocked-verbs . Upgrade alone does not authorize another call or reset consumed UAT receipts.

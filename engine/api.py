@@ -85,15 +85,27 @@ def create_router(service: EngineService | None = None) -> APIRouter:
     def engine():
         return service if service is not None else _service()
 
-    @router.get('/national/hotspots')
-    def national_hotspots(days: int=Query(1,ge=1,le=7)):
+    def national():
         nonlocal national_service
         with national_lock:
             if national_service is None:
                 backend=engine()
                 national_service=NationalService(backend.ingest,clock=backend.clock)
-        result=national_service.hotspots(days)
+        return national_service
+
+    @router.get('/national/hotspots')
+    def national_hotspots(days: int=Query(1,ge=1,le=7)):
+        result=national().hotspots(days)
         return _response(dict(result,items=[],points_omitted=True))
+
+    @router.get('/fire-events')
+    def fire_events(days: int=Query(7,ge=1,le=7), classification: str | None=Query(None,alias='class'),
+                    province: str | None=None, since: str | None=None):
+        return _response(national().fire_events(days,classification=classification,province=province,since=since))
+
+    @router.get('/national/overview')
+    def national_overview(days: int=Query(1,ge=1,le=7)):
+        return _response(national().overview(days))
 
     @router.get('/villages')
     def villages():

@@ -283,3 +283,56 @@ negative-cached for5min to avoid hammering providers during4s UI polling; each
 of two documented endpoints has a <=10s timeout and no automatic retry.
 Offline tests cover geometry parsing/deduplication, malformed/incomplete
 responses, stale cache, truthful spacing and unavailable fixture/API behavior.
+# Fire-event QA (A7, 2026-11-07)
+
+`fire_qa.py` groups cached FIRMS heat detections into **unconfirmed rule-based
+candidates**, never a confirmed fire, factory or eruption. `fire_qa_params.yaml`
+contains the distance/time/persistence thresholds, earth radius, grid constants,
+numeric tolerance and all heuristic confidence values. Confidence is not a
+calibrated probability. LOW is below the configured MED threshold; no HIGH label
+is emitted. Volcano context takes precedence over industrial persistence, then
+positive peat evidence, positive vegetation evidence and uncertainty.
+
+Union-find joins pairs at <=1 km AND <=48 hours, inclusively. Transitive event
+diameter/duration may exceed those pair limits. Events retain first/last UTC
+timestamps, original detection IDs, count, maximum FRP (null when absent), and
+unique satellites. Location/province follow the first detection; cross-province
+events are counted once. Persistent sources require >=5 distinct UTC days in
+the same approximate 375 m latitude-band grid cell, using the available seven-day
+feed context even when a shorter display window is selected. Persistence alone
+is LOW industrial candidacy, not a verified factory.
+
+Seven Indonesian Holocene volcano reference coordinates were checked against
+official Smithsonian GVP profiles on 2026-11-07; each is embedded with its source
+URL. The 5 km contextual rule does not establish an eruption. **This list is
+incomplete** and cannot rule out volcanic heat elsewhere. No peat mask or
+positive vegetation layer exists in the current engine; pilot reference points
+are not peat boundaries. Uncovered locations remain `tidak_pasti` and
+`peat_event_count` is null, while `classified_peat_event_count` remains a literal
+candidate count. OSM industrial evidence is an optional cached-input hook only
+(landuse=industrial or man_made=works/flare within 375 m of a reference point).
+No industrial cache is currently wired: reasons say exactly
+`OSM industri tidak tersedia`. No Overpass request/retry is made by A7.
+
+Operator-only routes reuse the existing NationalService and its FIRMS cache
+(provider TTL 900 s; national response cache 300 s):
+
+- `GET /api/fire-events?days=7&class=tidak_pasti&province=Central%20Kalimantan&since=2026-11-01T00:00:00Z`.
+  `class` accepts gambut/lahan_vegetasi/industri/gunung_api/tidak_pasti. `since`
+  requires an ISO timestamp with timezone and filters `last_seen >= since`,
+  retaining full event membership. Unknown class or malformed timestamp returns
+  422. Default days=7; valid range 1..7. No replay classification is provided.
+- `GET /api/national/overview?days=1` returns computed `headline_sentence`,
+  `headline` and `by_province` rows. Land counts contain only gambut and
+  lahan_vegetasi candidates; unknowns remain separate. Exclusions have separate
+  event and detection counts, avoiding subtraction of events from raw points.
+- `GET /api/national/hotspots` preserves raw `by_province`, `total_matched`,
+  `items:[]` and points_omitted. Additive fields include `raw_count`,
+  `event_count`, `classification_counts`, `headline`, `by_province_events`,
+  `events_snapshot_id`, `rule_version` and `evidence_coverage`.
+
+Event responses retain source/cache `data_as_of`, `stale`, `partial`, assumptions,
+2017 province boundary coverage, original detection IDs and a versioned snapshot
+hash covering full parameters, GVP evidence list and derived events. Available
+empty results can have zero counts; provider failures remain unavailable/503.
+Neither unknown land cover nor an incomplete volcanic list establishes safety.
