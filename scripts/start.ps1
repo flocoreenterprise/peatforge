@@ -9,7 +9,7 @@ try {
             python -m venv .venv
             if ($LASTEXITCODE -ne 0) { throw 'Virtual environment creation failed.' }
         }
-        & .\.venv\Scripts\python.exe -m pip install -r agents/requirements.txt -r engine/requirements.txt
+        & .\.venv\Scripts\python.exe -m pip install -r requirements.txt
         if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
         Push-Location web
         try {
