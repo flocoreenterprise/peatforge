@@ -8,6 +8,7 @@ from .db import Database, identifier, utc_now
 from .mock_engine import MockEngine, VILLAGE_ID
 from .models import Channel, ForecastPoint, Landmark, Mode, ObservationInput, Simulation, SimulationRequest, Status
 from .events import record
+from engine.cache import DataUnavailable
 
 
 class Engine(Protocol):
@@ -72,8 +73,7 @@ class ToolService:
         best: tuple[float, Any] = (0.0, None)
         for row in rows:
             aliases = [row['id'].lower(), row['name'].lower(), *json.loads(row['aliases'])]
-            score = max(1.0 if re.search(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', normalized)
-                        else SequenceMatcher(None, normalized, alias).ratio() for alias in aliases)
+            score = max(1.0 if re.search(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', normalized) else 0.0 for alias in aliases)
             if score > best[0]:
                 best = score, row
         score, row = best
@@ -90,7 +90,12 @@ class ToolService:
             return completed
         with self.db.connect() as connection:
             existing = connection.execute('SELECT pre_update_model FROM observations WHERE id=?', (observation_id,)).fetchone()
-        snapshot = json.loads(existing['pre_update_model']) if existing else self.get_village_status(observation.village_id, observation.mode, observation.day).model_dump()
+        try:
+            snapshot = json.loads(existing['pre_update_model']) if existing else self.get_village_status(observation.village_id, observation.mode, observation.day).model_dump()
+        except DataUnavailable:
+            if observation.wt_cm is not None:
+                raise
+            snapshot={'village_id':observation.village_id,'wt_cm':None,'reason':'model_context_unavailable','mode':observation.mode,'day':observation.day}
         with self.db.connect() as connection:
             connection.execute('INSERT OR IGNORE INTO observations(id,village_id,responder_id,anonymous,confirmed,pre_update_model,data,created_at) VALUES(?,?,?,?,?,?,?,?)',
                 (observation_id, observation.village_id, observation.responder_id, int(observation.anonymous), 1,
@@ -112,7 +117,7 @@ class ToolService:
             result={**recalibrate(observation.village_id,observation.model_dump(),observation_id),
                     'old':snapshot,'observation_id':observation_id,'trace_id':trace_id}
         elif observation.wt_cm is None:
-            result['reason']='no_water_depth'
+            result['reason']='qualitative_observation_no_numeric_update'
         self.db.set('observation-result:'+observation_id,result)
         record(self.db,'Warden','observation_confirmed',trace_id=trace_id,
                input={'village_id':observation.village_id,'responder_id':observation.responder_id,'mode':observation.mode,'day':observation.day},

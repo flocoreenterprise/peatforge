@@ -113,7 +113,7 @@ class VoiceTests(unittest.TestCase):
     def test_normal_voice_loop_uses_warden_planner_and_voice_transcripts(self):
         sid=self.sid()
         self.assertEqual(self.callback('start',sid).status_code,200)
-        for turn,speech,expected in ((0,'enam satu senti','asap'),(1,'ya','kanal'),(2,'kanal empat','Baca ulang')):
+        for turn,speech,expected in ((0,'enam satu senti','asap'),(1,'terlihat asap','Kira-kira'),(2,'kanal empat','Saya baca ulang')):
             response=self.callback('gather',sid,turn=turn,speech=speech)
             self.assertEqual(response.status_code,200,response.text)
             self.assertIn(expected,response.text)
@@ -132,7 +132,7 @@ class VoiceTests(unittest.TestCase):
 
     def test_bye_never_confirms_and_three_empty_turns_hang_up(self):
         sid=self.sid()
-        for turn,speech in ((0,'61'),(1,'ya'),(2,'kanal 4')):
+        for turn,speech in ((0,'61'),(1,'terlihat asap'),(2,'kanal 4')):
             self.callback('gather',sid,turn=turn,speech=speech)
         bye=self.callback('gather',sid,turn=3,speech='matiin ya')
         self.assertIsNotNone(ET.fromstring(bye.text).find('Hangup'))

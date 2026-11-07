@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import vm from 'node:vm';
+const context = { exports: {} };
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('./evidence.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, context);
+const { evidenceText } = context.exports;
+assert.match(evidenceText({ confidence_label: 'LOW', checks: [{ qualitative: true }] }), /Laporan kualitatif.*rendah \(LOW\).*Tidak diubah menjadi angka pengukuran/);
+assert.match(evidenceText({ confidence_label: 'LOW', checks: [{ qualitative: false }] }), /Laporan atau lokasi perlu diperiksa/);
+assert.doesNotMatch(evidenceText({ confidence_label: 'LOW', checks: [{ qualitative: false }] }), /Laporan kualitatif/);
+assert.match(evidenceText({ checks: [{ confidence_label: 'LOW', qualitative: true }] }), /kualitatif/);
+assert.equal(evidenceText({ confidence_label: 'REPORTED', checks: [] }), null, 'reported evidence is never relabelled LOW by the frontend');
+assert.equal(evidenceText({ checks: [] }), null, 'missing confidence is never guessed');
+assert.equal(evidenceText({ confidence_label: 'unknown' }), null);
+console.log('PASS: qualitative LOW disclosure, unmapped/numeric LOW wording and no inferred confidence');

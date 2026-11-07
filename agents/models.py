@@ -1,6 +1,6 @@
 """Validated shared tool inputs and engine results; no numeric generation by brains."""
 from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Mode = Literal['live', 'replay']
 Level = Literal['RENDAH', 'SEDANG', 'TINGGI', 'EKSTREM']
@@ -76,6 +76,20 @@ class ObservationInput(Model):
     confirmed: bool = False
     mode: Mode = 'live'
     day: int = Field(default=0, ge=0, le=61)
+    water_category: Literal['kering','sedikit','masih_ada','banjir'] | None = None
+    smoke_category: Literal['tidak','bau','terlihat','api'] | None = None
+    place_text: str | None = Field(default=None,max_length=150)
+    reported_words: dict[str,str] = Field(default_factory=dict)
+    evidence_type: Literal['numeric','qualitative'] = 'numeric'
+    confidence_label: Literal['REPORTED','LOW'] = 'REPORTED'
+
+    @model_validator(mode='after')
+    def classify_evidence(self):
+        if any(key not in ('water','smoke','place') or len(value)>200 for key,value in self.reported_words.items()):
+            raise ValueError('Invalid reported words')
+        self.evidence_type='qualitative' if self.wt_cm is None else 'numeric'
+        self.confidence_label='LOW' if self.wt_cm is None else 'REPORTED'
+        return self
 
 
 class Landmark(Model):

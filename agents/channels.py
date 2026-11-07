@@ -65,6 +65,7 @@ class Inbound(Model):
     confirmation_report: dict[str, Any] | None = None
     context_captured: bool = False
     trace_id: str | None = None
+    report: dict[str, Any] | None = None  # Internal deterministic parser output, never an HTTP body field.
 
 
 def verify_webhook(settings: ChannelSettings, key: str | None, raw: bytes,

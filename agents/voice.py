@@ -22,13 +22,14 @@ from .events import record
 from .scout import reserve_call,decision,WIB
 from .tools import ToolService
 from .warden import Warden,parse_report
+from .persona import BYE,WATER_QUESTION,SMOKE_QUESTION,PLACE_QUESTION,greeting,category_facts
 
 SID_TTL=15*60
 # Strong session capability, intentionally incompatible with the rehearsal plan:
 # v1.<base64url responder ID>.<UTC epoch seconds>.<128-bit hex nonce>.<purpose 0 normal|1 diag|2 UAT>.<full SHA256 HMAC>
 # MAC key = configured TWILIO_AUTH_TOKEN; message = "twilio-session:" + first five fields.
 # Valid for 15 minutes (+30s clock skew). Never print/store in trace or return in operator JSON.
-BYE=re.compile(r'\b(matiin|matikan|tutup|udahan|selesai|cukup|stop|goodbye|bye)\b',re.I)
+
 
 
 class _PrivateTwilioLog(logging.Filter):
@@ -241,7 +242,7 @@ class VoiceService:
             self.warden.reset_for_alert(responder_id,status.mode,status.day,trace)
         sid=sign_session(self.settings,responder_id,diagnostic=diagnostic,uat=uat,now=self.clock())
         session={'responder_id':responder_id,'diagnostic':diagnostic,'uat':uat,'call_id':call_id,'trace_id':trace,'mode':status.mode,'day':status.day,
-                 'stage':'diagnostic' if diagnostic else 'wt','turn':0,'empty':0,'rounds':0,'report':{},'responses':{},'status':'dispatching'}
+                 'stage':'diagnostic' if diagnostic else 'consent','turn':0,'empty':0,'rounds':0,'report':{},'responses':{},'status':'dispatching'}
         self.db.set(self._key(sid),session)
         form={'To':phone,'From':self.settings.from_number,'Url':self.settings.base()+'/api/voice/twilio/twiml/start?'+urlencode({'sid':sid}),
               'StatusCallback':self.settings.base()+'/api/voice/twilio/status?'+urlencode({'sid':sid})}
@@ -354,7 +355,7 @@ class VoiceService:
             # Strong SID is verifiable in any process; persisted context is preferred.
             status,context=self._context(identity['responder_id'])
             session={'responder_id':identity['responder_id'],'diagnostic':identity['diagnostic'],'uat':identity.get('uat',False),'call_id':identifier('vc'),
-                     'trace_id':context.get('trace_id') or identifier('t'),'mode':status.mode,'day':status.day,'stage':'diagnostic' if identity['diagnostic'] else 'wt',
+                     'trace_id':context.get('trace_id') or identifier('t'),'mode':status.mode,'day':status.day,'stage':'diagnostic' if identity['diagnostic'] else 'consent',
                      'turn':0,'empty':0,'rounds':0,'report':{},'responses':{}}
         return session
 
@@ -366,7 +367,7 @@ class VoiceService:
         with self._lock:
             session=self._session(sid,identity)
             text=('This is a consenting Peatforge test call. Please say a short sentence.' if session['diagnostic'] else
-                  'Halo, ini uji coba Peatforge. Berapa kedalaman air dari permukaan gambut, dalam sentimeter?')
+                  self.opening(session['responder_id']))
             if session.get('last_response'):
                 return self._render(sid,session,session['last_response'],pause=True)
             self.channels.record_voice(session['responder_id'],text,speech=text,trace_id=session['trace_id'],idempotency_key='m_voice_start_'+hashlib.sha256(sid.encode()).hexdigest())
@@ -410,6 +411,11 @@ class VoiceService:
                 self.channels.record_voice(session['responder_id'],response['text'],speech=speech_text(response['text']),trace_id=session['trace_id'],idempotency_key=f'm_voice_out_{digest}_{turn}')
             return self._render(sid,session,response)
 
+    def opening(self,responder_id):
+        with self.db.connect() as connection:
+            row=connection.execute('SELECT name,village_id FROM responders WHERE id=?',(responder_id,)).fetchone()
+        return greeting(row['name'] if row else None,row['village_id'] if row else None)
+
     def _turn(self,session,speech,digest,turn):
         if BYE.search(speech):
             return {'text':'Terima kasih sudah mengikuti uji coba Peatforge. Sampai jumpa.','hangup':True}
@@ -432,38 +438,56 @@ class VoiceService:
                 return {'text':reply['body'] if reply else 'Terima kasih. Laporan dicatat untuk ditinjau petugas.','hangup':True,'message_id':reply['id'] if reply else None}
             if result.get('state')=='idle':
                 session.update(stage='wt',report={})
-                return {'text':'Baik, laporan belum disimpan. Berapa kedalaman air dalam sentimeter?'}
+                return {'text':'Baik, laporan belum disimpan. '+WATER_QUESTION}
             return {'text':reply['body'] if reply else 'Apakah pembacaan ulang benar? Jawab ya untuk menyimpan, atau tidak untuk koreksi.','message_id':reply['id'] if reply else None}
+        if stage=='consent':
+            answer=speech.strip().lower().strip('.!?')
+            if answer in ('tidak','nggak','gak','tidak bersedia','tidak mau'):
+                return {'text':'Baik, tidak apa-apa. Terima kasih atas waktunya.','hangup':True}
+            if answer in ('ya','iya','boleh','silakan','silahkan','ada','oke','ok','mau','bersedia'):
+                session['stage']='wt'
+                return {'text':WATER_QUESTION}
+            # An unsolicited observation is itself willingness to report; never ask a number.
+            facts,clarify=parse_report(speech if re.search(r'\bair\b',speech,re.I) else 'AIR '+speech)
+            if not facts or clarify:
+                return {'text':'Mohon perjelas pengamatan airnya. '+WATER_QUESTION} if clarify else {'text':'Boleh saya mencatat pengamatan air, asap, dan tempat di sekitar Bapak/Ibu?'}
+            session['stage']='wt'
+            stage='wt'
         if stage=='wt':
             facts,clarify=parse_report(speech if re.search(r'\bair\b',speech,re.I) else 'AIR '+speech)
-            if clarify or not facts or facts.get('wt_cm') is None:
-                return {'text':'Mohon perjelas kedalaman air dalam sentimeter. Lima meter dan lima puluh sentimeter berbeda. Laporan belum disimpan.'}
-            report.update(facts)
+            facts=facts or {}
+            facts.update(category_facts(speech,water=True))
+            if clarify or not (facts.get('water_category') or facts.get('wt_cm') is not None):
+                return {'text':'Saya belum menangkap keadaan airnya. '+WATER_QUESTION}
+            report.update({key:value for key,value in facts.items() if key in ('wt_cm','water_category')})
+            report['reported_words']={'water':speech[:200]}
             session['stage']='smoke'
-            return {'text':'Apakah ada asap di sekitar lokasi? Jawab ada atau tidak.'}
+            return {'text':SMOKE_QUESTION}
         if stage=='smoke':
+            facts=category_facts(speech,smoke=True)
             value=speech.strip().lower().strip('.!?')
-            if value in ('ya','iya','ada'):
-                report['smoke']=True
-            elif value in ('tidak','nggak','tidak ada','nggak ada'):
-                report['smoke']=False
-            else:
-                facts,clarify=parse_report(speech)
-                if clarify or not facts or facts.get('smoke') is None:
-                    return {'text':'Apakah ada asap? Jawab ada atau tidak.'}
-                report['smoke']=facts['smoke']
+            if not facts and value in ('ya','iya','ada'):
+                return {'text':'Apakah terlihat asap, atau hanya tercium bau?'}
+            if not facts:
+                parsed,_=parse_report(speech)
+                if parsed and parsed.get('smoke') is not None:
+                    facts={'smoke':parsed['smoke'],'smoke_category':'terlihat' if parsed['smoke'] else 'tidak'}
+            if not facts:
+                return {'text':'Saya belum menangkap keadaan asapnya. '+SMOKE_QUESTION}
+            report.update(facts)
+            report.setdefault('reported_words',{})['smoke']=speech[:200]
             session['stage']='landmark'
-            return {'text':'Lokasinya dekat kanal atau sumur yang mana?'}
-        with self.db.connect() as connection:
-            village=connection.execute('SELECT village_id FROM responders WHERE id=?',(session['responder_id'],)).fetchone()['village_id']
-        landmark=self.tools.resolve_landmark(village,speech)
-        if not landmark.landmark_id:
-            return {'text':'Mohon sebut kanal atau sumur yang dikenali, misalnya kanal empat.'}
-        text=f"AIR {report['wt_cm']:g} ASAP {'YA' if report['smoke'] else 'TIDAK'} dekat {landmark.landmark_id}"
-        result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text=text,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:report:{turn}')
+            safety='Jauhi lokasi, jangan padamkan sendiri. ' if facts.get('fire') else ''
+            return {'text':safety+PLACE_QUESTION}
+        place=speech.strip()
+        if not place or len(place)>150:
+            return {'text':PLACE_QUESTION}
+        report['place_text']=place
+        report.setdefault('reported_words',{})['place']=place
+        result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text='Pengamatan warga',report=report,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:report:{turn}')
         session['stage']='confirm'
         outgoing=[item for item in result.get('items',[]) if item['direction']=='outbound' and item['channel']=='voice']
-        return {'text':speech_text(outgoing[-1]['body']) if outgoing else 'Mohon konfirmasi laporan dengan menjawab ya atau tidak.','message_id':outgoing[-1]['id'] if outgoing else None}
+        return {'text':speech_text(outgoing[-1]['body']) if outgoing else 'Apakah laporan sudah sesuai? Jawab ya atau tidak.','message_id':outgoing[-1]['id'] if outgoing else None}
 
     def status(self,sid,identity,params):
         value=params.get('CallStatus',[''])[0]

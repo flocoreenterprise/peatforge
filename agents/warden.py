@@ -7,6 +7,7 @@ from .db import Database
 from .models import ObservationInput
 from .tools import ToolService
 from .events import record
+from .persona import BYE,THANKS,category_facts,readback
 
 _ONES = dict(zip(('nol', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan'), range(10)))
 _NUMBER_WORDS = set(_ONES) | {'sepuluh', 'sebelas', 'belas', 'puluh', 'seratus', 'ratus', 'koma'}
@@ -47,8 +48,11 @@ def parse_report(text: str) -> tuple[dict[str, Any] | None, bool]:
     """Return parsed facts and clarification flag; embedded YA is smoke data only."""
     normalized = text.lower().strip()
     facts: dict[str, Any] = {}
+    qualitative=category_facts(text)
+    facts.update(qualitative)
     air = re.search(r'\bair\b\s*(?:(?:tanah|kurang|lebih|sekitar|sedalam|nya)\s*)*', normalized)
-    if air:
+    numeric_start=bool(air and re.match(r'[+-]?\d|(?:'+ '|'.join(_NUMBER_WORDS)+r')\b',normalized[air.end():]))
+    if air and (not qualitative.get('water_category') or numeric_start):
         tail = normalized[air.end():]
         match = re.match(r'([+-]?\d+(?:[.,]\d+)?)\s*(cm|sentimeter|senti|meter|metre|m)?\b', tail)
         if match:
@@ -76,7 +80,7 @@ def parse_report(text: str) -> tuple[dict[str, Any] | None, bool]:
     smoke = re.search(r'\basap\s+(ya|iya|ada|tidak|nggak|tidak ada)\b', normalized)
     if smoke:
         facts['smoke'] = smoke.group(1) in ('ya', 'iya', 'ada')
-    elif re.search(r'\basap\b', normalized):
+    elif re.search(r'\basap\b', normalized) and not qualitative.get('smoke_category'):
         return None, True
     return (facts or None), False
 
@@ -147,7 +151,7 @@ class Warden:
                 self.after_confirm(observation.model_dump(), saved)
             checkpoint['hook_done'] = True
             self.db.set(checkpoint_key, checkpoint)
-        return self._reply(message, state, 'Terima kasih. Laporan terkonfirmasi telah dicatat untuk ditinjau petugas.', observation_id=saved['observation_id'])
+        return self._reply(message, state, THANKS, observation_id=saved['observation_id'])
 
     def _reply(self, message: Inbound, state: dict, text: str, *, event='reply', **extra) -> dict:
         receipt='m_reply_'+message.processing_id+'_'+event if message.processing_id else None
@@ -173,6 +177,11 @@ class Warden:
         state = self.db.get(key, {'state': 'idle', 'mode': 'live', 'day': 0})
         text = message.text.strip().lower()
         standalone = re.sub(r'[.!?]+$', '', text).strip()
+        if BYE.search(message.text):
+            state.pop('pending',None)
+            state['state']='idle'
+            self.db.set(key,state)
+            return self._reply(message,state,'Baik, tidak usah dipaksakan. Terima kasih sudah menjawab. Kita akhiri dulu, ya.')
         if standalone in ('ya', 'iya'):
             return self._confirm(message, state, key)
         if standalone == 'tidak':
@@ -193,7 +202,13 @@ class Warden:
                 text='Simulasi panggilan dicatat. Tidak ada telepon nyata.' if result['status']=='mock' else 'Permintaan panggilan ditunda oleh kebijakan waktu atau batas kontak. Silakan kirim laporan melalui pesan.'
                 return self._reply(message,state,text)
             return self._reply(message, state, 'Panggilan belum tersedia. Silakan kirim AIR dalam cm dan ASAP YA atau TIDAK melalui pesan.')
-        facts, clarify = parse_report(text)
+        if message.report is not None:
+            allowed={'wt_cm','smoke','fire','water_category','smoke_category','place_text','reported_words'}
+            if any(field not in allowed for field in message.report):
+                raise ValueError('Invalid internal report')
+            facts,clarify=message.report,False
+        else:
+            facts, clarify = parse_report(text)
         if clarify:
             state.pop('pending', None)
             state['state'] = 'idle'
@@ -207,6 +222,24 @@ class Warden:
             if (mode, day) != (state.get('mode','live'), state.get('day',0)):
                 state.pop('trace_id', None)
             landmark = self.tools.resolve_landmark(responder['village_id'], text)
+            place=facts.get('place_text')
+            if not place:
+                match=re.search(r'\bdekat\s+(.+)$',message.text,re.I)
+                place=match.group(1).strip()[:150] if match else None
+            if place:
+                landmark=self.tools.resolve_landmark(responder['village_id'],place)
+                facts={**facts,'place_text':place}
+            if (facts.get('water_category') or facts.get('smoke_category')) and not facts.get('reported_words'):
+                words={}
+                water=re.search(r'\bair\b\s*(.*?)(?=\basap\b|\bbau\b|\bapi\b|\bdekat\b|$)',message.text,re.I)
+                smoke=re.search(r'\b(?:asap|bau|api)\b\s*(.*?)(?=\bdekat\b|$)',message.text,re.I)
+                if facts.get('water_category'):
+                    words['water']=(water.group(1).strip() if water else message.text)[:200]
+                if facts.get('smoke_category'):
+                    words['smoke']=(smoke.group(0).strip() if smoke else message.text)[:200]
+                if place:
+                    words['place']=place
+                facts={**facts,'reported_words':words}
             pending = dict(village_id=responder['village_id'], responder_id=message.responder_id,
                            mode=mode, day=day, landmark_id=landmark.landmark_id, note=message.text, **facts)
             observation = ObservationInput(**pending)
@@ -221,5 +254,8 @@ class Warden:
                 parts.append('asap ada' if observation.smoke else 'asap tidak ada')
             if landmark.name:
                 parts.append(landmark.name)
-            return self._reply(message, state, 'Baca ulang: ' + ', '.join(parts) + '. Balas YA untuk menyimpan atau TIDAK untuk koreksi.',event='readback')
+            wording=readback(observation.reported_words) if observation.reported_words else 'Baca ulang: ' + ', '.join(parts) + '. Balas YA untuk menyimpan atau TIDAK untuk koreksi.'
+            if observation.fire is True:
+                wording='Jauhi lokasi, jangan padamkan sendiri. '+wording
+            return self._reply(message,state,wording,event='readback')
         return self._reply(message, state, 'Mohon kirim laporan AIR dalam cm dan ASAP YA atau TIDAK. Konfirmasi laporan hanya dengan pesan YA tersendiri.')

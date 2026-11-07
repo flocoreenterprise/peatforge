@@ -3,11 +3,12 @@ import { api, type Config } from '../api';
 import './inbox.css';
 import { validFieldPath } from './fieldLink';
 import { deliveryLabel } from './delivery';
+import { evidenceText } from './evidence';
 import VoicePanel from '../voice/VoicePanel';
 type ChannelConfig = Config & { outbound?: string; voice_mode?: string };
 
-export type InboxProps = { villageId?: string; mode: 'live' | 'replay'; day: number };
-type Action = { id: string; village_id: string; title: string; reason: string; kind: string; status: string; mode: string; day: number; responder_id: string; anonymous: boolean; days_bought: number | null; at_least_days: number | null; simulation_reason?: string; benefit: { wt_gain_cm: number | null; pfvi_reduction: number | null }; verifier: { decision: string; checks: { name: string; passed: boolean | null; reason?: string }[] }; assumptions?: string[]; followup_status?: string };
+export type InboxProps = { villageId?: string; mode: 'live' | 'replay'; day: number; onShowLive?: () => void };
+type Action = { id: string; village_id: string; title: string; reason: string; kind: string; status: string; priority?: string; source?: string; mode: string; day: number; responder_id: string; anonymous: boolean; days_bought: number | null; at_least_days: number | null; simulation_reason?: string; benefit: { wt_gain_cm: number | null; pfvi_reduction: number | null }; verifier: { decision: string; confidence_label?: string; checks: { name: string; passed: boolean | null; reason?: string; confidence_label?: string; qualitative?: boolean }[] }; assumptions?: string[]; followup_status?: string };
 type Responder = { id: string; name: string; village_id: string };
 type Message = { id: string; direction: string; body: string; status: string; channel: string; created_at: string };
 type Progress = { state: string; mode: string; day: number; steps: { id: string; label: string; done: boolean }[] };
@@ -19,7 +20,7 @@ export function benefitText(action: Action): string {
   const parts = [action.benefit.wt_gain_cm !== null ? `Air lebih dangkal ${action.benefit.wt_gain_cm} cm` : '', action.benefit.pfvi_reduction !== null ? `PFVI turun ${action.benefit.pfvi_reduction}` : ''].filter(Boolean);
   return parts.length ? parts.join(' · ') + ' · tambahan hari belum tersedia' : 'Tambahan hari belum tersedia';
 }
-export default function DecisionInbox({ villageId, mode, day }: InboxProps) {
+export default function DecisionInbox({ villageId, mode, day, onShowLive }: InboxProps) {
   const context = useRef(''); context.current = villageId ?? '';
   const [items, setItems] = useState<Action[]>([]), [hidden, setHidden] = useState(0), [error, setError] = useState(''), [loaded, setLoaded] = useState(false);
   const [confirm, setConfirm] = useState<{ id: string; operation: 'approve' | 'reject' } | null>(null), [reason, setReason] = useState(''), [busy, setBusy] = useState(false);
@@ -34,14 +35,17 @@ export default function DecisionInbox({ villageId, mode, day }: InboxProps) {
     try { await api(`/actions/${encodeURIComponent(confirm.id)}/${confirm.operation}`, { method: 'POST', body: JSON.stringify(confirm.operation === 'reject' ? { reason: reason.trim() } : {}) }); setConfirm(null); setReason(''); await refresh(); } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   }
   const visible = items.filter(item => item.mode === mode && (mode === 'live' || item.day === day));
+  const hasPublicLive = mode === 'replay' && items.some(item => item.source === 'public' && item.mode === 'live' && item.status === 'proposed');
   return <section className="pf-inbox" aria-label="Kotak keputusan"><header><span className="pf-inbox-kicker">KENDALI OPERATOR</span><h3>Keputusan lapangan</h3><p>Usulan memerlukan persetujuan Anda. Disetujui belum berarti dilaksanakan.</p></header>
     {error && <p className="pf-inbox-error" role="alert">{error} Data terakhir mungkin kedaluwarsa.</p>}
+    {hasPublicLive && <div className="pf-inbox-public-notice" role="status"><p>Ada laporan publik Live yang menunggu keputusan. Laporan ini tidak dicampur dengan putar ulang.</p>{onShowLive && <button type="button" onClick={onShowLive}>Buka laporan publik Live</button>}</div>}
     {!loaded && !error && <p>Memuat keputusan…</p>}{loaded && !visible.length && <p className="pf-inbox-empty">Belum ada usulan untuk konteks ini. Laporan terkonfirmasi akan ditinjau Planner.</p>}
-    {visible.map(action => <article className="pf-inbox-card" key={action.id}><div className="pf-inbox-cardtop"><span>{action.kind === 'verify' ? 'Perlu dicek' : 'Usulan tindakan'}</span><span>{({ proposed: 'Menunggu persetujuan', approved: 'Disetujui · belum dilaksanakan', rejected: 'Ditolak', done: 'Selesai' } as Record<string, string>)[action.status] ?? action.status}</span></div><h4>{action.title}</h4><p>{action.reason}</p>
+    {visible.map(action => <article className="pf-inbox-card" key={action.id}>{action.priority === 'URGENT' && <strong className="pf-inbox-urgent">URGENT · Perlu perhatian segera</strong>}{action.source === 'public' && <strong className="pf-inbox-public-source">Laporan publik</strong>}<div className="pf-inbox-cardtop"><span>{action.kind === 'verify' ? 'Perlu dicek' : 'Usulan tindakan'}</span><span>{({ proposed: 'Menunggu persetujuan', approved: 'Disetujui · belum dilaksanakan', rejected: 'Ditolak', done: 'Selesai' } as Record<string, string>)[action.status] ?? action.status}</span></div><h4>{action.title}</h4><p>{action.reason}</p>
+      {evidenceText(action.verifier) && <p className="pf-inbox-evidence">{evidenceText(action.verifier)}</p>}
       {action.kind !== 'verify' && <p className="pf-inbox-impact">{benefitText(action)}</p>}<small>{action.anonymous ? 'Pelapor anonim' : `Pelapor: ${action.responder_id}`}</small>
       {(action.status === 'approved' || action.status === 'done') && <p className="pf-inbox-muted">Tindak lanjut: {deliveryLabel(action.followup_status)}. Persetujuan tidak memastikan pesan diterima.</p>}
       <details><summary>Kenapa usulan ini?</summary><p>Verifier: {action.verifier.decision === 'forward' ? 'Kuat' : action.verifier.decision === 'hold' ? 'Lemah · perlu pemeriksaan' : 'Cukup · ada catatan'}</p><ul>{action.verifier.checks.map((check, index) => <li key={`${check.name}-${index}`}>{({ confirmed: 'Laporan dikonfirmasi', water_table_discrepancy: 'Kesesuaian laporan dengan model', hotspots_2km_48h: 'Deteksi panas sekitar laporan', exact_tool_benefit: 'Manfaat sesuai hasil engine' } as Record<string, string>)[check.name] ?? check.name}: {check.passed === null ? 'data tidak tersedia' : check.passed ? 'lolos' : 'perlu perhatian'}{check.reason ? ` · ${check.reason}` : ''}</li>)}</ul>{action.simulation_reason && <p>Alasan model: {action.simulation_reason}</p>}{action.assumptions?.map(text => <p key={text}>{text}</p>)}<p>Perkiraan model, belum diukur. Deteksi panas bukan api terkonfirmasi.</p></details>
-      {action.status === 'proposed' && <div className="pf-inbox-buttons"><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'approve' }); setReason(''); }}>{action.kind === 'verify' ? 'Kirim petugas' : 'Setujui'}</button><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'reject' }); setReason(''); }}>Tolak</button></div>}
+      {action.status === 'proposed' && <div className="pf-inbox-buttons"><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'approve' }); setReason(''); }}>{action.kind === 'verify' ? 'Setujui pemeriksaan' : 'Setujui'}</button><button disabled={busy || !!error} onClick={() => { setConfirm({ id: action.id, operation: 'reject' }); setReason(''); }}>Tolak</button></div>}
       {confirm?.id === action.id && <div className="pf-inbox-confirm" role="group" aria-label="Konfirmasi keputusan"><p>{confirm.operation === 'approve' ? 'Setujui usulan dan proses tindak lanjut kepada pelapor? Status pengiriman akan ditampilkan terpisah. Pelaksanaan tetap belum dikonfirmasi.' : 'Tolak usulan ini? Catat alasannya.'}</p>{confirm.operation === 'reject' && <label>Alasan penolakan<textarea maxLength={500} value={reason} onChange={e => setReason(e.target.value)} /></label>}<div className="pf-inbox-buttons"><button disabled={busy || (confirm.operation === 'reject' && !reason.trim())} onClick={() => void transition()}>{busy ? 'Menyimpan…' : 'Konfirmasi'}</button><button disabled={busy} onClick={() => setConfirm(null)}>Batal</button></div></div>}
     </article>)}{hidden > 0 && <p className="pf-inbox-muted">{hidden} usulan lama disembunyikan (kedaluwarsa/digantikan).</p>}
   </section>;

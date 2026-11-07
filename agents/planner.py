@@ -69,25 +69,38 @@ class Planner:
             old = saved['old']
             checks = [{'name': 'confirmed', 'passed': observation['confirmed']}]
             difference = None if observation.get('wt_cm') is None or old.get('wt_cm') is None else abs(observation['wt_cm'] - old['wt_cm'])
-            hold = difference is not None and difference > 30
-            checks.append({'name': 'water_table_discrepancy', 'passed': not hold,
+            qualitative=observation.get('wt_cm') is None
+            unknown_place=bool(observation.get('place_text') and not observation.get('landmark_id'))
+            hold = difference is not None and difference > 30 or qualitative or unknown_place or observation.get('fire') is True
+            checks.append({'name': 'water_table_discrepancy', 'passed': None if difference is None else difference<=30,
                            'difference_cm': difference, 'limit_cm': 30, 'model_wt_cm': old.get('wt_cm'),
                            'observed_wt_cm': observation.get('wt_cm')})
-            try:
-                hotspots = self.tools.get_hotspots(observation['village_id'], hours=48, radius_km=2,
-                                                   mode=observation['mode'], day=observation['day'])
-            except DataUnavailable:
-                hotspots = {'available': False, 'items': [], 'reason': 'Hotspot data unavailable'}
+            if qualitative or unknown_place:
+                hotspots={'available':False,'items':[],'reason':'Human verification required; no numeric inference from categories'}
+            else:
+                try:
+                    hotspots = self.tools.get_hotspots(observation['village_id'], hours=48, radius_km=2,
+                                                       mode=observation['mode'], day=observation['day'])
+                except DataUnavailable:
+                    hotspots = {'available': False, 'items': [], 'reason': 'Hotspot data unavailable'}
             available = hotspots.get('available', False)
             checks.append({'name': 'hotspots_2km_48h', 'passed': None if not available else bool(hotspots['items']),
                            'available': available, 'detections': len(hotspots.get('items', [])),
                            'reason': hotspots.get('reason'), 'note': 'Heat detections are not confirmed fires',
                            'mode': observation['mode'], 'day': observation['day']})
             decision = 'hold' if hold else ('forward_with_flag' if not available or not hotspots.get('items') else 'forward')
-            verifier = {'decision': decision, 'checks': checks}
+            if qualitative or unknown_place:
+                checks.append({'name':'reported_observation','passed':None,'confidence_label':'LOW','qualitative':qualitative,'place_unmapped':unknown_place})
+            verifier = {'decision': decision, 'checks': checks,'confidence_label':'LOW' if qualitative or unknown_place else 'REPORTED'}
             candidates = []
             if hold:
-                candidates.append(self._base(observation, saved, 'dispatch_verify', 'verify', 'Perlu dicek: laporan berbeda dari model', verifier))
+                title='Perlu dicek: pengamatan warga' if qualitative or unknown_place else 'Perlu dicek: laporan berbeda dari model'
+                action=self._base(observation,saved,'dispatch_verify','verify',title,verifier)
+                action.update(place_text=observation.get('place_text'),reported_words=observation.get('reported_words',{}),
+                              water_category=observation.get('water_category'),smoke_category=observation.get('smoke_category'))
+                if observation.get('fire') is True:
+                    action.update(priority='URGENT',reason='Warga melaporkan melihat api; perlu pemeriksaan manusia, belum terverifikasi.')
+                candidates.append(action)
             else:
                 canals = self.tools.get_canals(observation['village_id'])
                 resources = self.tools.get_resources(observation['village_id'])

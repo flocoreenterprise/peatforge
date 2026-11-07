@@ -21,7 +21,8 @@ MODEL='gpt-realtime-2.1'
 VOICE='marin'
 TTL=15*60
 NAMES=('get_village_status','record_report','confirm_report','end_call')
-INSTRUCTIONS='''Kamu Warden, asisten AI untuk uji coba Peatforge. Sapa dengan bahasa Indonesia santai, sopan, singkat. Jangan mengaku BPBD atau menjanjikan keamanan/tindakan. Tanyakan SATU hal per giliran: kedalaman air dalam sentimeter, asap, lokasi kanal/sumur, lalu baca ulang dan minta YA tersendiri. Pamit seperti matiin ya, stop, cukup selalu mendahului alur lain: gunakan end_call, bukan konfirmasi. Panggil get_village_status untuk fakta model; selalu sebut perkiraan model, belum diukur. HANYA pada tahap wt/smoke/landmark, setelah transkrip pengguna final tersedia panggil record_report dengan argumen kosong. Server memproses transkrip tersimpan; jangan menghitung atau mengirim angka/kedalaman/identitas sendiri. Ucapkan text hasil tool, jangan menambah atau mengubah angka/URL. Jika tool stage=confirm, bacakan text persis sebelum konfirmasi; setelah transkrip pengguna BARU yang berdiri sendiri YA/IYA/TIDAK, gunakan confirm_report dengan argumen kosong, BUKAN record_report. ASAP YA bukan konfirmasi. Koreksi laporan lengkap saat confirm boleh memakai record_report untuk baca ulang baru. Aksi lapangan tetap memerlukan persetujuan operator. Jangan meminta data pribadi atau menjanjikan anonim. Tools mengikat identitas dan konteks di server.'''
+INSTRUCTIONS='''Kamu Warden, asisten AI uji coba Peatforge, bukan petugas resmi BPBD. Bahasa Indonesia sehari-hari, sopan, singkat. Mulai dengan get_village_status dan ucapkan text persis: identitas, tujuan, lalu izin Ada waktu sebentar? SATU pertanyaan per giliran. Sesudah izin, tanya pengamatan air (kering/sedikit/masih ada/banjir), asap (tidak/bau/terlihat/api), lalu nama tempat bebas seperti handil/parit/kebun/ladang/beje. Jangan meminta angka, kedalaman, satuan atau pengukuran. Angka sukarela hanya diproses server. Jangan mengubah kategori menjadi angka. Setelah transkrip final pada tahap consent/wt/smoke/landmark panggil record_report argumen kosong. Ucapkan text tool persis; jangan menambah fakta, janji atau hitungan. Pada stage confirm bacakan text persis, tunggu transkrip BARU YA/IYA/TIDAK tersendiri, lalu confirm_report argumen kosong. ASAP YA bukan konfirmasi. Pamit udahan/matiin/nanti saja/lagi sibuk selalu end_call, tidak pernah YA. Jika terlihat api, ucapkan instruksi keselamatan server; jangan menyuruh memadamkan sendiri. Penutupan dan tindak lanjut bersyarat hanya dari server. Jangan meminta data pribadi atau menjanjikan anonim. Aksi lapangan memerlukan persetujuan operator. Identitas/konteks ditentukan server.'''
+
 
 
 @dataclass(frozen=True)
@@ -179,7 +180,7 @@ class BrowserVoice:
                  'mode':access.mode,'day':access.day,'expires_at':self.clock()+TTL,'offline':offline,
                  'transcripts':{},'tool_results':{},'seq':0,'consumed_seq':0,'allowed_numbers':[],'allowed_urls':[],
                  'coordinator':{'responder_id':access.responder_id,'mode':access.mode,'day':access.day,'trace_id':trace,
-                                'stage':'wt','turn':0,'empty':0,'rounds':0,'report':{},'diagnostic':False}}
+                                'stage':'consent','turn':0,'empty':0,'rounds':0,'report':{},'diagnostic':False}}
         retained.append({key:session[key] for key in ('id','responder_id','expires_at')})
         self.db.set('browser-voice-index',retained)
         self._save(session)
@@ -343,8 +344,7 @@ class BrowserVoice:
                 raise HTTPException(409,'Voice session ending')
             if name=='get_village_status':
                 result=self.tools.get_village_status(session['village_id'],session['mode'],session['day']).model_dump()
-                if result.get('pfvi') is not None and result.get('wt_cm') is not None:
-                    result['text']=f"Tingkat model {result['level']}; indeks {result['pfvi']:g}; air {result['wt_cm']:g} sentimeter. Perkiraan model, belum diukur."
+                result['text']=self.coordinator.opening(session['responder_id']) if session['coordinator']['stage']=='consent' else 'Silakan lanjutkan pengamatan Bapak/Ibu.'
                 self._learn(session,result)
             elif name=='end_call':
                 session['soft_ending']=True

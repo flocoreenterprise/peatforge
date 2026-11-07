@@ -94,7 +94,7 @@ class RealtimeTests(unittest.TestCase):
     def test_full_transcript_gated_tool_flow_dedupes_and_ignores_no_model_numbers(self):
         sid=self.mint()
         self.assertEqual(self.tool(sid,'premature','record_report').status_code,409)
-        for index,text in enumerate(('enam satu senti','ya','kanal empat')):
+        for index,text in enumerate(('enam satu senti','terlihat asap','kanal empat')):
             event='user'+str(index)
             self.assertTrue(self.transcript(sid,event,text).json()['accepted'])
             if index==0:
@@ -119,6 +119,34 @@ class RealtimeTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/voice/end',json={'session_id':sid}).json(),{'ended':True})
         self.assertEqual(self.client.post('/api/voice/end',json={'session_id':sid}).json(),{'ended':True})
 
+    def test_qualitative_dispatcher_requires_readback_then_new_confirmation(self):
+        sid=self.mint()
+        intro=self.tool(sid,'intro','get_village_status').json()['text']
+        self.assertIn('asisten AI uji coba Peatforge',intro)
+        self.assertEqual(intro.count('?'),1)
+        self.assertIn('Ada waktu sebentar?',intro)
+        for index,text in enumerate(('YA','kering','bau terbakar','Handil milik warga')):
+            self.assertTrue(self.transcript(sid,'qual-user'+str(index),text).json()['accepted'])
+            response=self.tool(sid,'qual-tool'+str(index),'record_report')
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(response.json()['text'].count('?'),1)
+            self.assertNotIn('Berapa',response.json()['text'])
+        self.assertEqual(response.json()['stage'],'confirm')
+        self.transcript(sid,'premature-yes','YA')
+        self.assertEqual(self.tool(sid,'premature-qual','confirm_report').status_code,409)
+        self.assertTrue(self.transcript(sid,'qual-readback',response.json()['text'],'assistant').json()['accepted'])
+        self.assertEqual(self.tool(sid,'same-old-yes','confirm_report').status_code,409)
+        self.transcript(sid,'new-qual-yes','YA')
+        saved=self.tool(sid,'save-qual','confirm_report')
+        self.assertEqual(saved.json()['state'],'saved')
+        obs=self.client.get('/api/observations').json()['items'][0]
+        self.assertIsNone(obs['wt_cm'])
+        self.assertEqual(obs['smoke_category'],'bau')
+        self.assertFalse(obs.get('fire'))
+        self.assertEqual(obs['place_text'],'Handil milik warga')
+        self.assertEqual(self.client.get('/api/actions').json()['items'][0]['verifier']['confidence_label'],'LOW')
+        self.assertEqual(len(self.requests),1)
+
     def test_assistant_numeric_guard_rejects_invented_numbers_and_urls_without_storing(self):
         sid=self.mint()
         bad=self.transcript(sid,'bad','Air 999 cm pasti aman.','assistant')
@@ -137,7 +165,7 @@ class RealtimeTests(unittest.TestCase):
     def test_offline_simulation_no_key_same_pipeline_bye_and_event_dedupe(self):
         self.service.settings.key=''
         session=None
-        for index,text in enumerate(('61 senti','ya','kanal empat','YA')):
+        for index,text in enumerate(('61 senti','terlihat asap','kanal empat','YA')):
             body={'responder_id':'r1','mode':'replay','day':9,'event_id':'sim'+str(index),'text':text}
             if session:
                 body['session_id']=session
@@ -168,7 +196,7 @@ class RealtimeTests(unittest.TestCase):
     def test_failed_confirm_hook_resumes_same_observation_and_proposal(self):
         from .channels import ChannelUnavailable
         sid=self.mint()
-        for index,text in enumerate(('61 senti','ya','kanal empat')):
+        for index,text in enumerate(('61 senti','terlihat asap','kanal empat')):
             self.transcript(sid,'u'+str(index),text)
             readback=self.tool(sid,'c'+str(index),'record_report')
         self.assertTrue(self.transcript(sid,'assistant-readback',readback.json()['text'],'assistant').json()['accepted'])
@@ -191,7 +219,7 @@ class RealtimeTests(unittest.TestCase):
 
     def test_confirmation_requires_exact_validated_readback_then_new_user_turn(self):
         sid=self.mint()
-        for index,text in enumerate(('61 senti','ya','kanal empat')):
+        for index,text in enumerate(('61 senti','terlihat asap','kanal empat')):
             self.transcript(sid,'u'+str(index),text)
             readback=self.tool(sid,'c'+str(index),'record_report')
         self.transcript(sid,'early-yes','YA')
@@ -208,7 +236,7 @@ class RealtimeTests(unittest.TestCase):
 
     def test_simulation_cancel_then_new_report_and_private_auth_fail_closed(self):
         session=None
-        for index,text in enumerate(('61','ya','kanal empat','TIDAK','70','tidak','kanal empat','YA')):
+        for index,text in enumerate(('61','terlihat asap','kanal empat','TIDAK','70','tidak','kanal empat','YA')):
             body={'responder_id':'r1','mode':'replay','day':9,'event_id':'restart'+str(index),'text':text,'session_id':session}
             response=self.client.post('/api/voice/simulate',json=body)
             self.assertEqual(response.status_code,200,response.text)
