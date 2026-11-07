@@ -45,6 +45,28 @@ class ServiceTests(unittest.TestCase):
         points[1]['wt_cm']=60
         self.assertEqual(critical_index(points),1)
 
+    def test_current_critical_separate_from_pfvi_level_and_future_crossing(self):
+        run = self.engine._run(V, 'replay', 0)
+        for wt, pfvi, label, reason in [(60, 50, 'RENDAH', 'wt'),
+                                         (59.99, 250, 'EKSTREM', 'pfvi'),
+                                         (60, 250, 'EKSTREM', 'both'),
+                                         (59.99, 249.99, 'TINGGI', None)]:
+            with self.subTest(wt=wt, pfvi=pfvi):
+                synthetic = dict(run, curve=[dict(date='2019-06-15', wt_cm=wt, pfvi=pfvi, level=label),
+                                             dict(date='2019-06-16', wt_cm=60, pfvi=250, level='EKSTREM')])
+                with patch.object(self.engine, '_run', return_value=synthetic):
+                    status = self.engine.village_status(V, 'replay', 0)
+                    Status.model_validate(status)
+                    self.assertEqual(status['level'], label)
+                    self.assertEqual(status['pfvi_level'], label)
+                    self.assertEqual(status['critical_now'], reason is not None)
+                    self.assertEqual(status['critical_reason'], reason)
+                    self.assertEqual(status['days_to_critical'], 0 if reason else 1)
+                    self.assertEqual(status['critical_date'], '2019-06-15' if reason else '2019-06-16')
+                    props = self.engine.map_risk('replay', 0)['features'][0]['properties']
+                    self.assertEqual(props['critical_now'], status['critical_now'])
+                    self.assertEqual(props['critical_reason'], reason)
+
     def test_fixture_status_forecast_simulation_strict_agent_shapes(self):
         with patch('urllib.request.urlopen',side_effect=AssertionError('network prohibited')):
             status=self.engine.village_status(V,'replay',12)

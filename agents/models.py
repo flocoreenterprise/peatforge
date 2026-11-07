@@ -14,6 +14,9 @@ class Model(BaseModel):
 class Status(Model):
     village_id: str
     level: Level
+    pfvi_level: Level | None = None
+    critical_now: bool = False
+    critical_reason: Literal['wt', 'pfvi', 'both'] | None = None
     pfvi: float | None = Field(ge=0, le=300)
     wt_cm: float | None
     days_to_critical: int | None = Field(ge=0)

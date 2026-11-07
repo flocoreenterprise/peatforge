@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import './village.css';
+import { criticalPresentation, type CriticalStatus } from './critical';
 
 type Point = { date: string; wt_cm: number; pfvi: number };
-type Status = { level: string; pfvi: number | null; wt_cm: number | null; days_to_critical: number | null; confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[] };
+type Status = CriticalStatus & { confidence: number; source: string; stale: boolean; data_as_of: string; assumptions: string[] };
 type Simulation = { days_bought: number | null; at_least_days: number | null; reason: string | null; wt_gain_cm: number; pfvi_reduction: number; baseline_critical_date: string | null; scenario_critical_date: string | null; curve_baseline: Point[]; curve_scenario: Point[]; assumptions: string[] };
 type History = { version: number; created_at: string; observation_id?: string | null; params: { provenance?: string; initial_wt_cm?: number }; old?: Status; new?: Status; observed_wt_cm?: number; applied_initial_wt_delta_cm?: number };
 type Bundle = { status: Status; simulation: Simulation; canals: { id: string; name: string; source: string }[]; resources: { pumps: number; crews: number }; history: History[] };
@@ -70,9 +71,10 @@ export default function VillageDetail({ villageId, mode, day }: { villageId: str
   }, [villageId, mode, day]);
   if (!data) return <section className="village-detail" aria-live="polite"><h2>Detail desa</h2><p>{error || 'Memuat perkiraan desa…'}</p></section>;
   const { status: s, simulation: sim } = data;
-  const urgency = s.days_to_critical === null ? 'Ambang kritis belum tercapai dalam horizon 14 hari.' : s.days_to_critical === 0 ? 'Desa sudah melewati ambang kritis model.' : `Desa diperkirakan mencapai ambang kritis dalam ${number(s.days_to_critical)} hari.`;
+  const critical = criticalPresentation(s);
   return <section className="village-detail">
-    <header><span className="village-eyebrow">{mode === 'replay' ? `Replay · hari ${day}` : 'Kondisi desa'} · {s.level}</span><h2>{urgency}</h2><p className="village-benefit">{benefitText(sim)}</p></header>
+    <header><span className="village-eyebrow">{mode === 'replay' ? `Replay · hari ${day}` : 'Kondisi desa'} · Level PFVI {critical.pfviLevel}</span>{critical.wtCritical && <p className="village-warning" role="status"><strong>WT KRITIS sekarang · air tanah modelled ≥60 cm</strong></p>}<h2>{critical.urgency}</h2><p className="village-benefit">{benefitText(sim)}</p></header>
+    <p>Ambang kritis model: air tanah ≥60 cm atau PFVI ≥250; level PFVI memakai indeks PFVI saja.</p>
     <p className="village-model">modelled · perkiraan model, belum diukur</p>
     <div className="village-stats"><div><small>PFVI · modelled</small><strong>{number(s.pfvi)} / 300</strong></div><div><small>Air tanah · modelled</small><strong>{number(s.wt_cm)} cm</strong></div><div><small>Keyakinan heuristik</small><strong>{number(s.confidence)}</strong></div></div>
     {error && <p role="status" className="village-warning">Pembaruan gagal: {error}. Angka terakhir tetap ditampilkan.</p>}

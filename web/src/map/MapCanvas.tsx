@@ -83,10 +83,10 @@ export default function MapCanvas({ dark, villages, risk, hotspots, selectedId, 
       const status = risk?.features.find(feature => feature.properties.village_id === village.id)?.properties;
       const button = document.createElement('button');
       button.className = `village-marker ${village.lon < 114.13 ? 'label-left' : ''} ${status?.level?.toLowerCase() ?? 'unknown'} ${village.id === selectedId ? 'selected' : ''}`;
-      button.setAttribute('aria-label', `${village.name}: ${status?.level ?? 'risiko belum tersedia'} · perkiraan model, belum diukur. Pilih desa`);
+      button.setAttribute('aria-label', `${village.name}: PFVI ${status?.level ?? 'belum tersedia'}${status?.wt_cm != null && status.wt_cm >= 60 ? ' · WT kritis' : ''} · perkiraan model, belum diukur. Pilih desa`);
       button.setAttribute('aria-pressed', String(village.id === selectedId));
       const dot = document.createElement('span'); dot.className = 'marker-dot';
-      const label = document.createElement('span'); label.className = 'marker-label'; label.textContent = village.name;
+      const label = document.createElement('span'); label.className = 'marker-label'; label.textContent = village.name + (status?.wt_cm != null && status.wt_cm >= 60 ? ' · WT KRITIS' : '');
       button.append(dot, label); button.onclick = () => onSelect(village.id);
       return new maplibregl.Marker({ element: button, anchor: 'center' }).setLngLat([village.lon, village.lat]).addTo(instance);
     });

@@ -39,6 +39,13 @@ def critical_index(curve: list[dict]) -> int | None:
                      (point['wt_cm'] is not None and point['wt_cm'] >= 60))), None)
 
 
+def critical_reason(point: dict) -> str | None:
+    """Current model-state criticality is separate from the PFVI-only level."""
+    wt = point['wt_cm'] is not None and point['wt_cm'] >= 60
+    pfvi = point['pfvi'] is not None and point['pfvi'] >= 250
+    return 'both' if wt and pfvi else 'wt' if wt else 'pfvi' if pfvi else None
+
+
 def compare_curves(baseline: list[dict], scenario: list[dict], assumptions: list[str] | None = None) -> dict:
     """Discrete crossing semantics; curve index zero is the current state."""
     if not baseline or len(baseline) != len(scenario):
@@ -186,8 +193,10 @@ class EngineService:
         run = self._run(village_id, mode, day)
         curve = run['curve'][day:day+15]
         point, crossing = curve[0], critical_index(curve)
+        current_reason = critical_reason(point)
         weather = run['weather']
         return dict(village_id=village_id, level=point['level'], pfvi=point['pfvi'], wt_cm=point['wt_cm'],
+                    pfvi_level=point['level'], critical_now=current_reason is not None, critical_reason=current_reason,
                     days_to_critical=crossing, critical_date=curve[crossing]['date'] if crossing is not None else None,
                     confidence=run['confidence'], data_as_of=weather['data_as_of'], wt_source='modelled',
                     source='fixture' if weather['source']=='fixture' else 'modelled', stale=weather['stale'],

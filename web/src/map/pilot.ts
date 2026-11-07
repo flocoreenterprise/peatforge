@@ -3,7 +3,7 @@ import { api, type Village } from '../api';
 
 export type Mode = 'live' | 'replay';
 export type Level = 'RENDAH' | 'SEDANG' | 'TINGGI' | 'EKSTREM';
-export type Status = { village_id: string; name?: string; level: Level; pfvi: number | null; wt_cm: number | null; days_to_critical: number | null; critical_date: string | null; source: string; wt_source: string; stale: boolean; data_as_of: string | null; assumptions: string[]; confidence: number; mode: Mode; day: number };
+export type Status = { village_id: string; name?: string; level: Level; pfvi_level?: Level; critical_now?: boolean; critical_reason?: 'wt' | 'pfvi' | 'both' | null; pfvi: number | null; wt_cm: number | null; days_to_critical: number | null; critical_date: string | null; source: string; wt_source: string; stale: boolean; data_as_of: string | null; assumptions: string[]; confidence: number; mode: Mode; day: number };
 export type Risk = { type: 'FeatureCollection'; features: { type: 'Feature'; geometry: { type: 'Point'; coordinates: [number, number] }; properties: Status }[] };
 export type Hotspots = { items: { id: string; lat: number; lon: number; detected_at: string; source: string }[]; available?: boolean; stale: boolean; data_as_of: string | null; source?: string; reason?: string };
 export type ReplayMeta = { start: string; end: string; days: number; perfect_forecast: boolean };

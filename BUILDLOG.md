@@ -86,3 +86,4 @@ Reference app may be used visually/behaviorally when its URL is available, never
 - B8/integration: configured PIN/cookies, scoped responderlinks+3sfieldUI, protectedmock default, URLredaction/CSP, asyncSMSoffload, Scout/C5/C7/A6UI wiring; root133tests+33subtests PASS; webbuild+20formatterassertions PASS; secretsetupshape/uniqueness PASS.
 
 - QA1 Scout: existing cloud POST route verified and banner absent; public-demo Scout failures stay in a quiet retry status instead of main banner; Scout11tests PASS, webbuild PASS.
+- QA2 critical clarity: PFVI level preserved; current WT/PFVI critical flags and WT-critical map/detail labels separated from future forecast; root155tests+37subtests PASS, webbuild +10presentationassertions PASS; no numerical tuning.
