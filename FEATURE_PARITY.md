@@ -6,11 +6,11 @@ Fresh repository implementation only. Planning documents were read-only; rehears
 |---|---|---|
 | A1-A6 engine | Five BMKG reference points, cached public weather/ERA5, groundwater/PFVI, Days Bought, bounded confirmed-WT assimilation | Modelled, not independently field calibrated; replay unchanged by assimilation |
 | B3-B5 Warden/Scout/Planner/Verifier | Persisted SMS readback, standalone YA, proposal, human approve/reject and follow-up; risk crossings and code policy | Public demo and Scout outbound remain mocked; approval is not execution |
-| C1-C5 Command | Map/inbox/detail/trace; 4s polling; input-based simulation cache | Original mock SMS loop passed cloud QA; final screenshots scheduled12:15 |
+| C1-C5 Command | Map/inbox/detail/trace; 4s polling; input-based simulation cache | Original mock SMS loop passed cloud QA; 12:15 local responsive screenshots reviewed; no P0/P1 |
 | C7 light national | NOAA-20/21 province counts with pinned2017/34-unit polygon coverage | Heat detections, not confirmed fires; no national peat risk |
 | B8 auth and field links | Configured PIN cookies, isolated storage, scoped responder link and3s polling | Public demo default; no real contacts exposed |
 | B6a TwiML | Strong expiring signed session, consented chosen UAT, same Warden pipeline, current-live policy and hard daily cap | Provider/carrier UAT not run; no real calls or SMS sent |
-| Browser Realtime | Authorized after five QA commits; implementation underway | Offline tests only; user enters key later; 12:45 fallback gate |
+| Browser Realtime | Scoped ephemeral sessions, WebRTC transcript/audio guard, same Warden pipeline and Simulasi fallback | Offline tests pass; live session mint and microphone UAT are separate checks |
 | Deployment | One FastAPI server on loopback8000 | Tunnel stopped per unattended restriction; no push |
 | Remaining cuts | A7 hotspot QA,3D,Telegram,askbar | Not started |
 

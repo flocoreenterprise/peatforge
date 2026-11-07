@@ -73,7 +73,7 @@ fire-prevention outcome. Other dates legitimately return zero, unavailable exact
 - Open demo storage is isolated from real contacts; every external delivery is mocked. No real SMS/call was sent.
 - Scout enforces quiet hours and a hard one-call-per-day limit. Confirmed live WT can update a bounded initial condition; replay remains unchanged.
 - Proposal traces and national heat counts are available. Province boundaries are the labelled 2017/34-province set.
-- A7 hotspot QA,3D,Telegram,Realtime and ask bar remain cut.
+- A7 hotspot QA,3D,Telegram and ask bar remain cut.
 - SMS processing is offloaded from the async server loop. Live provider delivery still needs the scheduled UAT.
 
 ## Validation
@@ -85,7 +85,11 @@ npm.cmd run build
 node src/inbox/benefit.test.mjs
 ```
 
-Latest root suite:162 passed +37 subtests; web build PASS; benefit/delivery/field-link and QA presentation/cache/milestone checks PASS.
+Latest root suite:173 passed +37 subtests; web build PASS; benefit/delivery/field-link and QA presentation/cache/milestone checks PASS.
 Manual cloud test passed the complete mocked SMS loop including1day proposal and one follow-up.
 Security review found a quiet-hours follow-up gap; it was fixed and regression-tested. Live Twilio policy now uses current live risk even when the conversation is a replay. Provider and microphone UAT remain untested.
 Read AGENTS.md and CONTRACT.md before edits; contract includes planned routes, while OpenAPI lists implemented routes.
+
+## Browser Warden
+
+Open Telepon-SMS and select Telepon Warden (or use the scoped responder page). Browser voice uses an ephemeral credential, gpt-realtime-2.1 and marin by default. Allow the microphone only when starting a call. Final transcripts pass the server guard before buffered audio plays; report confirmation requires the validated readback followed by a new YA. Provider or browser errors retain the labelled Simulasi text flow. Numeric paraphrases may fail closed. Live session mint and real microphone quality remain separate UAT checks.

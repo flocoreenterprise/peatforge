@@ -353,7 +353,7 @@ class VoiceService:
         if not landmark.landmark_id:
             return {'text':'Mohon sebut kanal atau sumur yang dikenali, misalnya kanal empat.'}
         text=f"AIR {report['wt_cm']:g} ASAP {'YA' if report['smoke'] else 'TIDAK'} dekat {landmark.landmark_id}"
-        result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text=text,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:report')
+        result=self.channels.inbound(Inbound(responder_id=session['responder_id'],channel='voice',text=text,mode=session['mode'],day=session['day']),external_id=f'voice:{digest}:report:{turn}')
         session['stage']='confirm'
         outgoing=[item for item in result.get('items',[]) if item['direction']=='outbound' and item['channel']=='voice']
         return {'text':speech_text(outgoing[-1]['body']) if outgoing else 'Mohon konfirmasi laporan dengan menjawab ya atau tidak.','message_id':outgoing[-1]['id'] if outgoing else None}

@@ -5,7 +5,7 @@ CSP=("default-src 'self'; script-src 'self'; worker-src 'self' blob:; "
      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
      "font-src 'self' https://fonts.gstatic.com data:; "
      "img-src 'self' data: blob: https://server.arcgisonline.com https://*.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org; "
-     "connect-src 'self' https://server.arcgisonline.com https://*.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org; "
+     "connect-src 'self' https://api.openai.com https://server.arcgisonline.com https://*.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org; media-src 'self' blob:; "
      "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")
 
 
@@ -35,7 +35,7 @@ class SecurityHeaders:
                 headers['Content-Security-Policy']=CSP
                 headers['X-Content-Type-Options']='nosniff'
                 headers['X-Frame-Options']='DENY'
-                headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+                headers['Permissions-Policy']='camera=(), microphone=(self), geolocation=()'
                 if private:
                     headers['Cache-Control']='no-store'
                 redact()

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import './field.css';
+import VoicePanel from '../voice/VoicePanel';
 
 type Message = { id: string; direction: string; body: string; created_at: string; status: string };
-type ResponseBody = { items: Message[]; responder?: { name: string; village_id: string }; state?: string };
+type ResponseBody = { items: Message[]; responder?: { name: string; village_id: string }; state?: string; browser_voice_supported?: boolean };
 class FieldError extends Error { constructor(public status: number) { super('Layanan percakapan belum tersedia.'); } }
 const displayTime = (value: string) => Number.isNaN(Date.parse(value)) ? '' : new Date(value).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit' }) + ' WIB';
 const messageStatus = (status: string) => ({ mock: 'Simulasi pengiriman', sent: 'Terkirim', delivered: 'Diterima', received: 'Diterima', failed: 'Pengiriman gagal', queued: 'Menunggu pengiriman' })[status] ?? 'Tercatat';
@@ -13,6 +14,7 @@ export default function FieldInbox({ token }: { token: string }) {
   const [name, setName] = useState('');
   const [text, setText] = useState('');
   const [state, setState] = useState('');
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const [error, setError] = useState('');
   const [access, setAccess] = useState<'loading' | 'ready' | 'invalid' | 'denied'>('loading');
   const [sending, setSending] = useState(false);
@@ -41,13 +43,13 @@ export default function FieldInbox({ token }: { token: string }) {
     const controller = new AbortController(); let stopped = false; let busy = false; let terminal = false;
     generation.current += 1;
     blocked.current = false; revision.current = 0;
-    setMessages([]); setName(''); setText(''); setState(''); setError(''); setAccess('loading'); setSending(false); inFlight.current = false;
+    setMessages([]); setName(''); setText(''); setState(''); setVoiceSupported(false); setError(''); setAccess('loading'); setSending(false); inFlight.current = false;
     async function load() {
       if (busy || terminal || blocked.current || inFlight.current) return; busy = true;
       const currentRevision = revision.current;
       try {
         const result = await request('messages', controller.signal);
-        if (!stopped && !blocked.current && currentRevision === revision.current) { setMessages(result.items); setName(result.responder?.name ?? ''); setAccess('ready'); setError(''); if (result.state) setState(result.state); }
+        if (!stopped && !blocked.current && currentRevision === revision.current) { setMessages(result.items); setName(result.responder?.name ?? ''); setAccess('ready'); setVoiceSupported(result.browser_voice_supported === true); setError(''); if (result.state) setState(result.state); }
       } catch (value) {
         if (!stopped) {
           terminal = value instanceof FieldError && [401, 403, 404].includes(value.status);
@@ -83,6 +85,7 @@ export default function FieldInbox({ token }: { token: string }) {
   if (access === 'invalid' || access === 'denied') return <main className="pf-field pf-field-unavailable"><h1>{access === 'invalid' ? 'Link ini tidak berlaku' : 'Akses percakapan ditolak'}</h1><p>Hubungi operator untuk mendapatkan link yang berlaku.</p></main>;
   return <main className="pf-field">
     <header className="pf-field-header"><h1>Percakapan Peatforge</h1><p>{name || 'Memuat identitas petugas…'}</p><small>Jaga link ini agar hanya Anda yang menggunakannya.</small></header>
+    {access === 'ready' && voiceSupported && <VoicePanel fieldToken={token}/>}
     <section className="pf-field-thread" aria-label="Percakapan dengan Warden" aria-busy={access === 'loading'}>
       {access === 'loading' && <p>Memuat percakapan…</p>}
       {access === 'ready' && !messages.length && <p>Belum ada pesan. Kirim laporan lapangan kepada Warden.</p>}

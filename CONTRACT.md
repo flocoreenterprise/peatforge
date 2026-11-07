@@ -261,3 +261,16 @@ No live external communication during build until provider setup and the chosen 
 B8 delivery configuration: PEATFORGE_LIVE_CHANNELS=true is an explicit separate opt-in; defaultfalse keeps channels mocked even in protectedmode. Publicdemo alwaysmock. UAT_PHONE_NUMBER is a masked E.164 chosen testrecipient, entered only throughset-secrets.ps1. LocalSESSION_SECRET/contactencryption/hash/webhook secrets may be created by entering !generate inside thatscript; never printed. PIN always userchosen, nofallback.
 Latest Scout cap is hardonecall/responder/WIBday INCLUDINGEKSTREM; EKSTREM bypassesquiet hours only, neverdailycap/cooldown.
 Uvicorn starts with --no-proxy-headers so request.client remains the socketpeer and spoofed forwardingheaders cannot bypassratelimits.
+
+## Browser Warden Realtime — latest authorized B6
+
+- Browser voice is explicitly initiated by the user, independent of SMS/Twilio live-channel flags. Public demo contacts remain fixtures and SMS/Twilio remain mocked.
+- Default model is gpt-realtime-2.1; default voice marin. User configures OPENAI_API_KEY only through set-secrets.ps1. Missing key/provider errors return503; no master key or raw provider error is returned or logged.
+- All browser voice endpoints accept an operator session (public-demo operator policy unchanged), or X-Field-Token. If a field header is present it takes precedence, forces responder/context from the stored token, and invalid tokens never fall through to operator access.
+- POST /api/voice/session accepts {responder_id?,mode?,day?}; returns {session_id,client_secret,expires_at,session_expires_at,model,voice}. client_secret is only the short-lived provider ephemeral capability. Master API key stays server-side. Session creation is limited to5/min/token with additional bounded global/active limits.
+- POST /api/voice/transcript accepts {session_id,event_id,role:user|assistant,text}; stores final scoped voice messages idempotently. Assistant text requires an explicit accepted:true ACK before display/playback; rejected numeric claims are not stored as validated statements.
+- POST /api/voice/tool accepts {session_id,call_id,name,arguments:{}}. Names are get_village_status,record_report,confirm_report,end_call. Identity is server-bound; report/confirmation uses persisted user text, never model-supplied numerical fields.
+- POST /api/voice/simulate accepts {responder_id?,mode?,day?,session_id?,text,event_id}; deterministic same-Warden voice conversation without provider access. POST /api/voice/end accepts {session_id} and closes the scoped local session idempotently.
+- Browser responses are serialized with automatic provider response/interrupt generation disabled. Remote audio is buffered in memory and played only after matching transcript approval, completed response and drained output; rejected/unknown responses close the peer and show Simulasi. No audio file is persisted. A separate client call limit is not the ephemeral credential expiry.
+- A report needs actual readback and a newer standalone confirmation. Bye words never mean yes. Field action proposals still need operator approval.
+- Config and field-message responses expose browser_voice_supported as a route capability, not proof of provider readiness. Real microphone/voice quality requires attended UAT.

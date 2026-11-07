@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import vm from 'node:vm';
+const context = { exports: {} };
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('./sessionClock.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, context);
+const { ephemeralCurrent, callLifetimeMs } = context.exports;
+const now = Date.parse('2026-11-07T05:00:00Z');
+assert.equal(ephemeralCurrent((now + 60000) / 1000, now), true);
+assert.equal(ephemeralCurrent((now - 1000) / 1000, now), false);
+assert.equal(ephemeralCurrent('invalid', now), false);
+assert.equal(callLifetimeMs((now + 900000) / 1000, now), 300000, 'internal call TTL is locally capped at five minutes, independent of mint expiry');
+assert.equal(callLifetimeMs(undefined, now), 300000, 'absent call expiry never reuses the sixty-second credential TTL');
+assert.equal(callLifetimeMs((now + 120000) / 1000, now), 120000);
+assert.equal(callLifetimeMs((now - 1000) / 1000, now), 1);
+console.log('PASS: mint expiry gates only connection, ongoing call uses separate bounded server deadline');

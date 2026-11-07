@@ -3,6 +3,7 @@ import { api, type Config } from '../api';
 import './inbox.css';
 import { validFieldPath } from './fieldLink';
 import { deliveryLabel } from './delivery';
+import VoicePanel from '../voice/VoicePanel';
 type ChannelConfig = Config & { outbound?: string; voice_mode?: string };
 
 export type InboxProps = { villageId?: string; mode: 'live' | 'replay'; day: number };
@@ -62,6 +63,7 @@ export function SmsLoop({ villageId, mode, day }: InboxProps) {
   const enabled = demo && !!selected;
   return <section className="pf-inbox pf-sms" aria-label={demo ? "Simulator SMS operator" : "Percakapan responder"}><header><span className="pf-inbox-kicker">{demo ? "KANAL SIMULASI" : "KANAL RESPONDER"}</span><h3>{demo ? "Alur SMS lapangan" : "Percakapan responder"}</h3><p>{demo ? "Simulasi operator · tidak mengirim SMS nyata. AIR 61 adalah contoh laporan demo yang diketik operator." : "Pesan tersimpan dan status pengiriman dari kanal responder."}</p></header><label>Responden<select value={selected} onChange={e => setSelected(e.target.value)}>{responders.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>{!responders.length && <p>Responden belum tersedia.</p>}
     <FieldShare key={selected} responderId={selected} />
+    {selected && config?.browser_voice_supported && <VoicePanel responderId={selected} mode={mode} day={mode === 'live' ? 0 : day}/>}
     {demo && <button className="pf-inbox-alert" disabled={!enabled || busy} onClick={() => void send(true)}>1. Picu peringatan model</button>}{notice && <p role="status">{notice}</p>}
     {error && <p className="pf-inbox-error" role="alert">{error}</p>}
     {demo && progress && <><ol className="pf-inbox-steps">{progress.steps.map(step => <li key={step.id} className={step.done ? 'pf-inbox-stepdone' : ''}><span>{step.done ? '✓' : '○'}</span>{step.label}</li>)}</ol><p className="pf-inbox-muted">Status tersimpan: {progress.state} · {progress.mode} / hari {progress.day}</p>{(progress.mode !== mode || (mode === 'replay' && progress.day !== day)) && <p>Progres berasal dari konteks sebelumnya. Picu peringatan untuk konteks saat ini.</p>}</>}

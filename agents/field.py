@@ -41,7 +41,7 @@ class FieldService:
         state=self.db.get('warden:'+responder['id'],{})
         return {'items':message_items(self.db,responder['id'],after),
                 'responder':{'name':responder['name'],'village_id':responder['village_id']},
-                'state':state.get('state','idle'),'mode':state.get('mode','live'),'day':state.get('day',0)}
+                'state':state.get('state','idle'),'mode':state.get('mode','live'),'day':state.get('day',0),'browser_voice_supported':True}
 
     def send(self,token:str,text:str)->dict:
         responder=self.responder(token)

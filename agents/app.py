@@ -1,6 +1,7 @@
 """Main service skeleton. Operator routers will mount behind shared auth in B8."""
 from contextlib import asynccontextmanager, suppress
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,7 @@ from .auth import AuthSettings, COOKIE_NAME, OperatorAuth, SESSION_SECONDS, peer
 from .field import FieldService
 from .security import SecurityHeaders
 from .voice import VoiceService,VoiceSettings
+from .realtime import Access,BrowserVoice,Settings as BrowserSettings
 from .scout import decision,sms_policy
 from urllib.parse import parse_qs
 
@@ -107,6 +109,36 @@ class OperatorSend(Model):
     channel:Literal['sms','web']='sms'
 
 
+class BrowserStart(Model):
+    responder_id:str|None=Field(default=None,min_length=1,max_length=80)
+    mode:Mode|None=None
+    day:int|None=Field(default=None,ge=0,le=61)
+
+
+class BrowserTranscript(Model):
+    session_id:str=Field(min_length=1,max_length=80)
+    event_id:str=Field(min_length=1,max_length=128)
+    role:Literal['user','assistant']
+    text:str=Field(min_length=1,max_length=500)
+
+
+class BrowserTool(Model):
+    session_id:str=Field(min_length=1,max_length=80)
+    call_id:str=Field(min_length=1,max_length=128)
+    name:str=Field(min_length=1,max_length=80)
+    arguments:dict=Field(default_factory=dict)
+
+
+class BrowserEnd(Model):
+    session_id:str=Field(min_length=1,max_length=80)
+
+
+class BrowserSimulate(BrowserStart):
+    session_id:str|None=Field(default=None,min_length=1,max_length=80)
+    event_id:str=Field(min_length=1,max_length=128)
+    text:str=Field(min_length=1,max_length=500)
+
+
 def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
                public_demo: bool | None = None, engine: EngineService | None = None,
                data_source: str | None = None, web_dist: Path | None = None,
@@ -160,6 +192,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         app.state.warden.on_call=app.state.scout.place_call
         app.state.field=FieldService(database,app.state.channels)
         app.state.voice=VoiceService(database,app.state.tools,app.state.channels,app.state.warden,VoiceSettings.from_environment())
+        app.state.browser_voice=BrowserVoice(database,app.state.tools,app.state.channels,app.state.voice,BrowserSettings.from_environment())
         app.state.channels.outbound_policy=lambda responder,channel:sms_policy(database,app.state.tools,responder,channel,
                                             datetime.fromtimestamp(app.state.voice.clock(),timezone.utc))
         app.state.brain = OfflineBrain()
@@ -190,6 +223,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     app.state.config = dict(mode='mock' if public_demo else 'protected', public_demo=public_demo,
                             source=source, engine='deterministic', outbound='mock',
                             poll_ms=4000, field_poll_ms=3000, voice_available=False,scout_background=background_enabled)
+    app.state.config['browser_voice_supported']=True
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValueError)
@@ -359,6 +393,61 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
     @app.get('/api/field/{token}/messages')
     def field_messages(token:str,after:str|None=Query(None,max_length=40)):
         return app.state.field.messages(token,after)
+
+    def browser_access(request:Request,body=None,session_id=None):
+        if 'x-field-token' in request.headers:
+            token=request.headers.get('X-Field-Token','')
+            responder=app.state.field.responder(token) # Invalid field credential never falls through to operator.
+            owner='field:'+hashlib.sha256(token.encode()).hexdigest()
+            state=app.state.database.get('warden:'+responder['id'],{})
+            return Access(owner,responder['id'],responder['village_id'],state.get('mode','live'),state.get('day',0),True)
+        require_operator(request)
+        owner='operator:public' if public_demo else 'operator:'+hashlib.sha256(request.cookies.get(COOKIE_NAME,'').encode()).hexdigest()
+        if session_id:
+            session=app.state.database.get(app.state.browser_voice._key(session_id))
+            if not session:
+                raise HTTPException(404,'Unknown voice session')
+            if session['owner']!=owner:
+                raise HTTPException(403,'Voice scope mismatch')
+            return Access(owner,session['responder_id'],session['village_id'],session['mode'],session['day'])
+        responder_id=body.responder_id if body is not None else None
+        if not responder_id:
+            raise HTTPException(422,'Responder required')
+        with app.state.database.connect() as connection:
+            row=connection.execute('SELECT village_id FROM responders WHERE id=?',(responder_id,)).fetchone()
+        if not row:
+            raise KeyError('Unknown responder')
+        state=app.state.database.get('warden:'+responder_id,{})
+        mode=body.mode if body.mode is not None else state.get('mode','live')
+        day=body.day if body.day is not None else state.get('day',0)
+        if mode=='live' and day!=0:
+            raise HTTPException(422,'Live context requires day zero')
+        return Access(owner,responder_id,row['village_id'],mode,day)
+
+    @app.post('/api/voice/session')
+    async def browser_session(request:Request,body:BrowserStart):
+        access=browser_access(request,body)
+        return await asyncio.to_thread(app.state.browser_voice.mint,access)
+
+    @app.post('/api/voice/transcript')
+    def browser_transcript(request:Request,body:BrowserTranscript):
+        access=browser_access(request,session_id=body.session_id)
+        return app.state.browser_voice.transcript(access,body.session_id,body.event_id,body.role,body.text)
+
+    @app.post('/api/voice/tool')
+    def browser_tool(request:Request,body:BrowserTool):
+        access=browser_access(request,session_id=body.session_id)
+        return app.state.browser_voice.tool(access,body.session_id,body.call_id,body.name,body.arguments)
+
+    @app.post('/api/voice/end')
+    def browser_end(request:Request,body:BrowserEnd):
+        access=browser_access(request,session_id=body.session_id)
+        return app.state.browser_voice.end(access,body.session_id)
+
+    @app.post('/api/voice/simulate')
+    def browser_simulate(request:Request,body:BrowserSimulate):
+        access=browser_access(request,body,body.session_id)
+        return app.state.browser_voice.simulate(access,body.text,body.event_id,body.session_id)
 
     @app.post('/api/field/{token}/send')
     def field_send(token:str,body:FieldSend):
