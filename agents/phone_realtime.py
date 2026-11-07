@@ -45,6 +45,8 @@ class PhoneRealtime:
     def __init__(self, voice, browser, *, connector=provider_connection, deadline=180):
         self.voice, self.browser, self.connector = voice, browser, connector
         self.deadline = min(180, max(0.01, deadline))
+        self._watchdogs={}
+        self._closing=False
 
     def enabled(self):
         return (os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime')
@@ -71,9 +73,70 @@ class PhoneRealtime:
         stream = ET.SubElement(ET.SubElement(root,'Connect'),'Stream',
                                url=self.voice.settings.base().replace('https://','wss://',1)+'/api/voice/stream/'+sid)
         ET.SubElement(stream,'Parameter',name='sid',value=sid)
-        # Network/setup disconnect before first audio still has a signed nonlooping fallback.
-        ET.SubElement(root,'Redirect',method='POST').text = self.fallback_url(sid)
+        # REST installs the legacy flow only on an explicit pre-audio failure.
+        # If REST is unavailable, closing the stream advances directly to Hangup.
+        ET.SubElement(root,'Hangup')
         return ET.tostring(root,encoding='unicode')
+
+    async def arm_deadline(self, sid, call):
+        """Arm once after authenticated start; raw CallSid stays only in task memory.
+
+        The persisted provider hash is required even if a webhook's HMAC is valid.
+        Fallback callbacks and process restarts retain the original wall deadline.
+        """
+        identity=verify_session(self.voice.settings,sid,now=self.voice.clock())
+        if not identity or not isinstance(call,str) or not re.fullmatch(r'CA[0-9a-fA-F]{32}',call):
+            raise HTTPException(403,'Voice scope mismatch')
+        key=hashlib.sha256(sid.encode()).hexdigest()
+        with self.voice._lock:
+            state=self.voice.db.get(self.voice._key(sid),{})
+            digest=hashlib.sha256(call.encode()).hexdigest()
+            if (state.get('responder_id')!=identity['responder_id'] or not state.get('provider_hash')
+                    or not hmac.compare_digest(state['provider_hash'],digest)):
+                raise HTTPException(403,'Voice scope mismatch')
+            if identity['diagnostic'] or not self.enabled() and not state.get('realtime_deadline'):
+                return False
+            if self._closing:
+                raise HTTPException(503,'Voice unavailable')
+            if key in self._watchdogs:
+                return True
+            if len(self._watchdogs)>=32:
+                raise HTTPException(429,'Voice session limit')
+            state.setdefault('realtime_deadline',self.voice.clock()+self.deadline)
+            self.voice.db.set(self.voice._key(sid),state)
+            remaining=max(0,state['realtime_deadline']-self.voice.clock())
+        task=asyncio.create_task(self._watch_deadline(sid,call,remaining))
+        self._watchdogs[key]=(task,sid,call)
+        task.add_done_callback(lambda finished:self._watchdog_done(key,finished))
+        return True
+
+    def _watchdog_done(self, key, task):
+        self._watchdogs.pop(key,None)
+        # Retrieve exceptions without ever passing their text to a logger.
+        if not task.cancelled():
+            task.exception()
+
+    async def _watch_deadline(self, sid, call, remaining):
+        await asyncio.sleep(remaining)
+        self.finish(sid)
+        completed=await self.update_call(call,{'Status':'completed'})
+        with self.voice._lock:
+            state=self.voice.db.get(self.voice._key(sid),{})
+            state['realtime_watchdog_status']='completed' if completed else 'termination_unconfirmed'
+            self.voice.db.set(self.voice._key(sid),state)
+
+    async def close(self):
+        """Cancel owned timers and attempt termination of their bound calls on shutdown."""
+        self._closing=True
+        entries=list(self._watchdogs.values())
+        for task,_,_ in entries:
+            task.cancel()
+        await asyncio.gather(*(entry[0] for entry in entries),return_exceptions=True)
+        self._watchdogs.clear()
+        for _,sid,_ in entries:
+            self.finish(sid)
+        await asyncio.gather(*(self.update_call(call,{'Status':'completed'})
+                               for _,_,call in entries),return_exceptions=True)
 
     def terminal(self, sid):
         if not verify_session(self.voice.settings,sid,now=self.voice.clock()):

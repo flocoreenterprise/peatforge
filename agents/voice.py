@@ -206,7 +206,9 @@ class VoiceService:
         mode,day=state.get('mode','live'),state.get('day',0)
         return self.tools.get_village_status(row['village_id'],mode,day),state
 
-    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False):
+    def call(self,responder_id,diagnostic=False, *,uat=False,cli_uat_pair=False,cli_realtime_uat=False,cli_retry_rejected=False,server_limit_only=False):
+        if (cli_retry_rejected or server_limit_only) and not cli_realtime_uat:
+            raise ChannelUnavailable('Dedicated attended Realtime UAT required')
         if cli_realtime_uat:
             if diagnostic or cli_uat_pair or os.environ.get('VOICE_ENGINE')!='realtime' or not os.environ.get('OPENAI_API_KEY','').strip():
                 raise ChannelUnavailable('Realtime UAT requires the configured real engine and its single dedicated flow')
@@ -233,7 +235,7 @@ class VoiceService:
         now=datetime.fromtimestamp(self.clock(),timezone.utc)
         if cli_realtime_uat and not mock:
             from .uat_realtime import reserve_realtime_uat
-            allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now)
+            allowed,reason=reserve_realtime_uat(self.db,responder_id,policy_status.level,now,retry_rejected=cli_retry_rejected)
         else:
             allowed,reason=(reserve_uat_pair(self.db,responder_id,policy_status.level,now,diagnostic) if cli_uat_pair and not mock else
                             reserve_call(self.db,responder_id,policy_status.level,now,risk_override=bool((diagnostic or uat) and not mock)))
@@ -254,7 +256,7 @@ class VoiceService:
         self.db.set(self._key(sid),session)
         form={'To':phone,'From':self.settings.from_number,'Url':self.settings.base()+'/api/voice/twilio/twiml/start?'+urlencode({'sid':sid}),
               'StatusCallback':self.settings.base()+'/api/voice/twilio/status?'+urlencode({'sid':sid})}
-        if not diagnostic and os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime') and os.environ.get('OPENAI_API_KEY','').strip():
+        if not server_limit_only and not diagnostic and os.environ.get('VOICE_ENGINE','twiml').strip().lower() in ('auto','realtime') and os.environ.get('OPENAI_API_KEY','').strip():
             # Carrier duration cap survives relay disconnects and the TwiML fallback.
             form['TimeLimit']='180'
         outcome='unknown'
@@ -263,11 +265,16 @@ class VoiceService:
                               auth=(self.settings.account_sid,self.settings.auth_token)) as client:
                 response=client.post('https://api.twilio.com/2010-04-01/Accounts/'+self.settings.account_sid+'/Calls.json',data=form)
                 if response.status_code>=400:
+                    session['http_status']=response.status_code
                     outcome='failed' if response.status_code<500 else 'unknown'
                     try:
-                        code=response.json().get('code')
-                        if isinstance(code,int) and not isinstance(code,bool) and 0<code<1000000:
+                        payload=response.json()
+                        code=payload.get('code')
+                        if isinstance(code,int) and not isinstance(code,bool) and 0<=code<1000000:
                             session['error_code']=code
+                        message=str(payload.get('message','')).lower()
+                        if 'parameter' in message:
+                            session['error_class']='parameter_rejected'
                     except (ValueError,AttributeError):
                         pass
                 else:
@@ -283,8 +290,9 @@ class VoiceService:
             current.update(status=outcome)
             if session.get('provider_hash'):
                 current['provider_hash']=session['provider_hash']
-            if session.get('error_code'):
-                current['error_code']=session['error_code']
+            for name in ('error_code','error_class','http_status'):
+                if name in session:
+                    current[name]=session[name]
             self.db.set(self._key(sid),current)
         record(self.db,'Warden','call_requested',trace_id=trace,input={'responder_id':responder_id,'mode':status.mode,'day':status.day,'policy_level':policy_status.level,'diagnostic':diagnostic,'uat':uat},
                output={'call_id':call_id,'status':outcome})
@@ -303,7 +311,7 @@ class VoiceService:
             state=json.loads(row['value'])
             if state.get('responder_id')==responder_id:
                 attempts.append({'call_id':state['call_id'],'status':state.get('provider_status',state.get('status','unknown')),
-                                 'error_code':state.get('error_code')})
+                                 'error_code':state.get('error_code'),'http_status':state.get('http_status'),'error_class':state.get('error_class')})
         result={'mode':self.mode(),'calls':[],'attempts':attempts[-5:],'transcript':transcript,'error_code':None}
         if self.channels.settings.public_demo or self.channels.settings.force_mock:
             return result
@@ -356,6 +364,11 @@ class VoiceService:
             with self.db.connect() as connection:
                 if not connection.execute('SELECT 1 FROM responders WHERE id=?',(identity['responder_id'],)).fetchone():
                     raise ValueError('Unknown session')
+            with self._lock:
+                current=self.db.get(self._key(sid[0]))
+                if current:
+                    current['provider_callback_received']=True
+                    self.db.set(self._key(sid[0]),current)
             return sid[0],identity,query
         except (ValueError,UnicodeError,ChannelUnavailable):
             raise HTTPException(403,'Voice webhook authentication required') from None

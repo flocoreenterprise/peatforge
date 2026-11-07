@@ -213,6 +213,7 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
         try:
             yield
         finally:
+            await app.state.phone_realtime.close()
             if task:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -470,9 +471,11 @@ def create_app(*, db_path: str | Path | None = None, mock: bool | None = None,
             params=parse_qs(raw.decode('utf-8'),keep_blank_values=True,max_num_fields=80)
         except (ValueError,UnicodeError):
             raise HTTPException(422,'Invalid voice payload') from None
+        service=app.state.voice
+        sid,identity,query=await asyncio.to_thread(service.authenticate,path,raw_query,params,signature)
+        if kind=='start' and app.state.phone_realtime.enabled() and not identity['diagnostic']:
+            await app.state.phone_realtime.arm_deadline(sid,params.get('CallSid',[''])[0])
         def process():
-            service=app.state.voice
-            sid,identity,query=service.authenticate(path,raw_query,params,signature)
             if kind=='status':
                 return service.status(sid,identity,params)
             if app.state.phone_realtime.terminal(sid):

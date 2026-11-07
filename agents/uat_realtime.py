@@ -1,9 +1,10 @@
 """Single explicitly authorized Realtime UAT after the already-completed test pair."""
 import json
+from datetime import datetime
 from .scout import WIB, decision
 
 
-def reserve_realtime_uat(database, responder_id, level, now):
+def reserve_realtime_uat(database, responder_id, level, now, *, retry_rejected=False):
     today=now.astimezone(WIB).date().isoformat()
     key='call-policy:'+responder_id
     receipt='uat-realtime:'+responder_id
@@ -13,6 +14,30 @@ def reserve_realtime_uat(database, responder_id, level, now):
             row=connection.execute('SELECT value FROM kv WHERE key=?',(name,)).fetchone()
             return json.loads(row['value']) if row else {}
         state,pair,used=read(key),read('uat-pair:'+responder_id),read(receipt)
+        if retry_rejected:
+            if used.get('date')!=today or used.get('rejected_retry_used') or state.get('date')!=today or state.get('count')!=3:
+                return False,'realtime_retry_unavailable'
+            records=connection.execute("SELECT input,output,created_at FROM agent_events WHERE event='call_requested' ORDER BY created_at DESC,rowid DESC").fetchall()
+            attempt=next((row for row in records if json.loads(row['input']).get('responder_id')==responder_id),None)
+            if not attempt or datetime.fromisoformat(attempt['created_at'].replace('Z','+00:00')).timestamp()<used.get('reserved_at',float('inf')):
+                return False,'realtime_retry_no_rejected_attempt'
+            output=json.loads(attempt['output'])
+            states=[json.loads(row['value']) for row in connection.execute("SELECT value FROM kv WHERE key LIKE 'voice-session:%'")]
+            failed=next((entry for entry in states if entry.get('call_id')==output.get('call_id')),None)
+            # 'failed' is assigned only for definitive HTTP4xx; transport/5xx ambiguity is 'unknown'.
+            activity=failed and (any(failed.get(name) for name in ('provider_hash','provider_status','provider_callback_received',
+                'realtime_claimed','realtime_deadline','realtime_terminal','last_response','responses')) or failed.get('turn',0)>0)
+            if output.get('status')!='failed' or not failed or failed.get('status')!='failed' or activity:
+                return False,'realtime_retry_not_definitively_rejected'
+            allowed,reason=decision('voice',level,now,calls_today=0,last_call=state.get('last_call'),risk_override=True)
+            if not allowed:
+                return False,reason
+            used['rejected_retry_used']=True
+            used['rejected_call_id']=output['call_id']
+            state['last_call']=now.timestamp()
+            for name,value in ((key,state),(receipt,used)):
+                connection.execute('UPDATE kv SET value=? WHERE key=?',(json.dumps(value),name))
+            return True,'allowed_manual_retry_rejected_create'
         if used.get('date')==today:
             return False,'realtime_uat_used'
         if (state.get('date')!=today or state.get('count')!=2 or pair.get('date')!=today

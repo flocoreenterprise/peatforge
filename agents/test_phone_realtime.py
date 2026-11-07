@@ -91,7 +91,8 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('<Connect>',xml)
         self.assertIn('/api/voice/stream/'+self.sid,xml)
         self.assertIn('<Parameter name="sid"',xml)
-        self.assertIn('fallback=1',xml)
+        self.assertIn('<Hangup',xml)
+        self.assertNotIn('<Redirect',xml)
         self.assertNotIn('Timeout',xml)
         self.assertIsNone(self.phone.start(self.sid,self.identity,fallback=True))
         self.browser.settings.key=''
@@ -332,3 +333,61 @@ class PhoneRealtimeTests(unittest.IsolatedAsyncioTestCase):
         await relay.receive_twilio()
         self.assertEqual(self.browser._load(relay.session_id,relay.access).get('readback_validated_seq',0),0)
         self.phone.update_call.assert_not_called()
+
+    async def test_watchdog_rejects_arbitrary_callsid_and_arms_once(self):
+        for sid,call in (('invalid',CALL),(self.sid,'CA'+'d'*32),(self.sid,'not-call')):
+            with self.assertRaises(HTTPException):
+                await self.phone.arm_deadline(sid,call)
+        await self.phone.arm_deadline(self.sid,CALL)
+        first=list(self.phone._watchdogs.values())[0][0]
+        deadline=self.voice.db.get(self.voice._key(self.sid))['realtime_deadline']
+        await self.phone.arm_deadline(self.sid,CALL)
+        self.assertEqual(len(self.phone._watchdogs),1)
+        self.assertIs(list(self.phone._watchdogs.values())[0][0],first)
+        self.assertEqual(self.voice.db.get(self.voice._key(self.sid))['realtime_deadline'],deadline)
+        await self.phone.close()
+        self.assertTrue(first.done())
+        self.assertEqual(self.phone._watchdogs,{})
+        self.assertTrue(self.phone.terminal(self.sid))
+
+    async def test_watchdog_survives_old_twiml_fallback_and_terminates_at_original_deadline(self):
+        self.phone.deadline=0.03
+        await self.phone.arm_deadline(self.sid,CALL)
+        deadline=self.voice.db.get(self.voice._key(self.sid))['realtime_deadline']
+        self.assertIsNone(self.phone.start(self.sid,self.identity,fallback=True))
+        await self.phone.arm_deadline(self.sid,CALL)
+        task=list(self.phone._watchdogs.values())[0][0]
+        await asyncio.wait_for(task,1)
+        self.assertTrue(self.phone.terminal(self.sid))
+        self.phone.update_call.assert_awaited_once_with(CALL,{'Status':'completed'})
+        state=self.voice.db.get(self.voice._key(self.sid))
+        self.assertEqual(state['realtime_deadline'],deadline)
+        self.assertEqual(state['realtime_watchdog_status'],'completed')
+
+    async def test_watchdog_restart_rearms_remaining_time_and_records_rest_failure(self):
+        state=self.voice.db.get(self.voice._key(self.sid))
+        state['realtime_deadline']=self.voice.clock()-1
+        self.voice.db.set(self.voice._key(self.sid),state)
+        self.phone.update_call=AsyncMock(return_value=False)
+        await self.phone.arm_deadline(self.sid,CALL)
+        await asyncio.wait_for(list(self.phone._watchdogs.values())[0][0],1)
+        self.assertIn('<Hangup',self.phone.start(self.sid,self.identity,fallback=True))
+        self.assertEqual(self.voice.db.get(self.voice._key(self.sid))['realtime_watchdog_status'],'termination_unconfirmed')
+        self.phone.update_call.assert_awaited_once_with(CALL,{'Status':'completed'})
+
+    async def test_provider_failure_fallback_does_not_cancel_registered_watchdog(self):
+        self.phone.deadline=0.05
+        await self.phone.arm_deadline(self.sid,CALL)
+        task=list(self.phone._watchdogs.values())[0][0]
+        self.phone.connector=AsyncMock(side_effect=RuntimeError('private-provider-failure'))
+        ws=Socket([self.start_frame()])
+        await self.phone.handle(ws,self.sid)
+        self.assertTrue(ws.closed)
+        self.assertFalse(task.done())
+        self.assertIsNone(self.phone.start(self.sid,self.identity,fallback=True))
+        await asyncio.wait_for(task,1)
+        self.assertEqual(self.phone.update_call.await_count,2)
+        self.assertEqual(self.phone.update_call.await_args_list[0].args,
+            (CALL,{'Url':self.phone.fallback_url(self.sid),'Method':'POST'}))
+        self.assertEqual(self.phone.update_call.await_args_list[1].args,(CALL,{'Status':'completed'}))
+        self.assertTrue(self.phone.terminal(self.sid))
